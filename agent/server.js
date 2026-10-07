@@ -228,15 +228,19 @@ function offerForce(g, pendingText) {
   bc('bar', {}); bc('state', {});
 }
 // 助手关掉时让模型一起下线（模型是「一直在线」的，不然助手关了显存还被占着）
-const OLLAMA_EXE = path.join(__dirname, '..', 'Ollama', 'ollama.exe');   // 只起后台服务 serve：没有窗口、没有托盘图标，不会跳出来
+// 只起后台服务 serve：没有窗口、没有托盘图标，不会跳出来。
+// 先找助手目录里自带的 Ollama，没有就用正常安装的那份（10-07 用户电脑上自带的不在，Ollama 一直起不来，只报 fetch failed）
+const OLLAMA_EXE = [path.join(__dirname, '..', 'Ollama', 'ollama.exe'), path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Ollama', 'ollama.exe')].find((p) => { try { return fs.statSync(p).isFile(); } catch (e) { return false; } }) || 'ollama';
 const killOllama = () => { try { execFileSync('taskkill', ['/f', '/t', '/im', 'ollama app.exe', '/im', 'ollama.exe', '/im', 'llama-server.exe'], { stdio: 'ignore' }); } catch (e) {} };   // 模型跑在子进程 llama-server 里：只杀 ollama 它会变孤儿占着显存，下次加载挤不进显卡、慢到超时（10-05 实测占 5GB）
 const ollamaUp = () => new Promise((ok) => { const r = require('http').get(cfg.ollama + '/api/version', (res) => { res.resume(); ok(true); }); r.on('error', () => ok(false)); r.setTimeout(1500, () => { r.destroy(); ok(false); }); });
 async function ensureOllama() {   // 助手开 Ollama 跟着开，助手关 Ollama 跟着关
   if (await ollamaUp()) return;
   try { execFileSync('taskkill', ['/f', '/im', 'llama-server.exe'], { stdio: 'ignore' }); } catch (e) {}   // Ollama 没在跑，这时还在的 llama-server 都是上次留下的孤儿
   // flash attention + 8 位 KV 缓存：同样显存装两倍上下文（10-05 实测 128K 整个在显卡里，160K 放不下）
-  try { spawn(OLLAMA_EXE, ['serve'], { stdio: 'ignore', windowsHide: true, env: { ...process.env, OLLAMA_FLASH_ATTENTION: '1', OLLAMA_KV_CACHE_TYPE: 'q8_0' } }).unref(); } catch (e) {}
+  try { spawn(OLLAMA_EXE, ['serve'], { stdio: 'ignore', windowsHide: true, env: { ...process.env, OLLAMA_FLASH_ATTENTION: '1', OLLAMA_KV_CACHE_TYPE: 'q8_0' } }).on('error', (e) => bbS('Ollama 启动失败', e)).unref(); } catch (e) {}   // 找不到 exe 时 spawn 会异步报 error，不接住整个后台就崩了
   for (let i = 0; i < 40; i++) { if (await ollamaUp()) return; await new Promise((r) => setTimeout(r, 500)); }
+  bbS('Ollama 20 秒内没起来，用的是', OLLAMA_EXE);
+  notice('Ollama 启动不起来（用的是 ' + OLLAMA_EXE + '）。请手动打开 Ollama 后再试。');
 }
 process.on('exit', () => { desk.close(); imggen.close(); auto.close(); try { execFileSync('curl.exe', ['--noproxy', '*', '-s', '-m', '5', '-d', '@-', cfg.ollama + '/api/generate'], { input: JSON.stringify({ model: cfg.model, keep_alive: 0 }), stdio: ['pipe', 'ignore', 'ignore'] }); } catch (e) {} killOllama(); });
 for (const sg of ['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGBREAK']) process.on(sg, () => { bbS('收到信号', sg); process.exit(0); });
