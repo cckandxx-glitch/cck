@@ -454,7 +454,7 @@ button,nav a,.cv,.sw,.ma,.send,.plus,.chip,.ghost{transition:background-color .1
 .send.idle{opacity:.5}
 .send.ready{background:var(--accent);color:var(--accent-ink);opacity:1}
 .send.ready:hover{background:#fff}
-.send.stopmode{background:rgba(255,255,255,.16);color:var(--ink);opacity:1}
+.send.stopmode{background:rgba(255,255,255,.16);color:#c8372d;opacity:1}
 .send:active{transform:scale(.92)}
 .ma:active,.cbox .cp:active,.sw:active,.chip:active{transform:scale(.96)}
 :focus-visible{outline:1px solid rgba(255,255,255,.5);outline-offset:1px}
@@ -520,7 +520,6 @@ html.loading body{visibility:hidden}
   <span class="grow"></span>
   
     <button class="ic" id="gear" title="设置"><svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" style="transform:translateX(2px)"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg></button>
-  <button class="stop" id="stopBtn">STOP</button>
   <span id="wbtns"><button id="wMin" aria-label="最小化"><svg viewBox="0 0 10 10"><path d="M0 5.5h10"/></svg></button><button id="wMax" aria-label="最大化"><svg class="mx" viewBox="0 0 10 10"><rect x=".5" y=".5" width="9" height="9" rx="1"/></svg><svg class="rs" viewBox="0 0 10 10"><rect x=".5" y="2.5" width="7" height="7" rx="1"/><path d="M2.5 2.5V1.5a1 1 0 0 1 1-1h5a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1h-1"/></svg></button><button id="wClose" aria-label="关闭"><svg viewBox="0 0 10 10"><path d="M.5 .5l9 9M9.5 .5l-9 9"/></svg></button></span>
   <div class="pop" id="pop"><button class="btn" id="aiBtn" disabled><span class="l">AI 已离线</span><b class="tg"><i></i></b></button><hr class="psep"><label class="sw" id="swNet" title="打开后 AI 才能上网搜索、读网页、做线索挖掘"><span>联网：关</span><b class="tg"><i></i></b></label>
           <label class="sw" id="swDesk" title="打开后 AI 才能看屏幕、动鼠标键盘。默认关。"><span>桌面：关</span><b class="tg"><i></i></b></label>
@@ -778,9 +777,6 @@ function paint() {
   $('#swDesk').classList.toggle('on', S.desktop); $('#swDesk span').textContent = '桌面';
   $('#swThink').classList.toggle('on', S.think); $('#swThink span').textContent = '思考';
   paintConvs();
-  const live = (st === 'on' && !booting) || (!!S.busy && S.busy !== 'AI 上线/下线');
-  $('#stopBtn').classList.toggle('idle', !live);
-  if (!S.busy) { clearTimeout(stopSlowT); $('#stopBtn').classList.remove('stopping', 'slow'); }
   $('#status').textContent = '';
   $('#sendBtn').disabled = !!S.busy && S.busy !== '对话' && S.busy !== '学习循环'; $('#qGo').disabled = !!S.busy; $('#lGo').disabled = !!S.busy; $('#lStop').disabled = S.busy !== '线索挖掘';
   $('#foot').innerHTML = '<svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>' + esc(S.ws || ''); $('#foot').title = '工作文件夹：' + (S.ws || '');
@@ -794,8 +790,8 @@ $('#swAuto').onclick = async () => { await api('/api/settings', { auto: !(S.auto
 $('#swNet').onclick = async () => { await api('/api/settings', { online: !S.online }); refresh(); };
 $('#swDesk').onclick = async () => { await api('/api/settings', { desktop: !S.desktop }); refresh(); };
 $('#swThink').onclick = async () => { await api('/api/settings', { think: !S.think }); refresh(); };
-let stopSlowT = 0;
-$('#stopBtn').onclick = () => { const b = $('#stopBtn'); if (b.classList.contains('idle')) return; if (S.busy) { b.classList.add('stopping'); clearTimeout(stopSlowT); stopSlowT = setTimeout(() => b.classList.add('slow'), 10000); } api('/api/stop', {}).then(() => refresh()); };
+// 急停（右上角 STOP 已删，改由输入框急停键 / Esc 触发）
+function stopNow() { api('/api/stop', {}).then(() => refresh()); }
 
 // ---------- 对话 ----------
 const chat = $('#chat');
@@ -1468,19 +1464,19 @@ const STOP_SVG = '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="7" y="7"
 // 发送键：空着是暗的，有字或有附件变成实心；AI 正在回答、输入框又是空的，就变成「停止」
 function sendUi() {
   const b = $('#sendBtn'); if (!b) return;
-  const has = !!(inpEl.value.trim() || atts.length), stop = !has && S.busy === '对话';
+  const has = !!(inpEl.value.trim() || atts.length), stop = !has && (S.busy === '对话' || S.busy === '学习循环');
   b.classList.toggle('ready', has); b.classList.toggle('stopmode', stop); b.classList.toggle('idle', !has && !stop);
   const k = stop ? 1 : 0; if (b._k !== k) { b._k = k; b.innerHTML = stop ? STOP_SVG : UP_SVG; b.title = stop ? '停止（Esc）' : '发送（Enter）'; }
 }
 inpEl.addEventListener('input', sendUi); setInterval(sendUi, 250); sendUi();
-$('#sendBtn').onclick = () => { if ($('#sendBtn').classList.contains('stopmode')) $('#stopBtn').click(); else send(); };
+$('#sendBtn').onclick = () => { if ($('#sendBtn').classList.contains('stopmode')) stopNow(); else send(); };
 // 点输入框里的空白处也进输入框
 $('.composer .box').addEventListener('mousedown', (e) => { if (e.target.closest('button,textarea,.plus')) return; e.preventDefault(); inpEl.focus(); });
 // Esc：AI 在回答时按一下就停（有弹窗、右键菜单、放大图开着的时候先关它们）
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape' || e.isComposing || e.defaultPrevented) return;
   if (document.querySelector('.dlgmask,.lbx') || ctx.style.display === 'block' || (e.target && e.target.id === 'convQ') || (e.target && e.target.classList && e.target.classList.contains('cvedit'))) return;
-  if ((S.busy === '对话' || S.busy === '学习循环') && page === 'chat') { e.preventDefault(); $('#stopBtn').click(); }
+  if ((S.busy === '对话' || S.busy === '学习循环') && page === 'chat') { e.preventDefault(); stopNow(); }
 }, true);
 // 文件拖进窗口时整个窗口提示「松手」
 { const v = document.createElement('div'); v.id = 'dropv'; v.textContent = '松手，把文件交给 AI'; document.body.appendChild(v);
