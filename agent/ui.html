@@ -202,11 +202,11 @@ textarea{width:100%;padding:10px 12px;border:1px solid var(--line2);border-radiu
 #wk>span{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}   /* 顺序：已 xx 秒 · 硬件数据 · 正在干什么。长短会变的文字放最后，怎么变都推不动前面的东西 */
 #wk em .gauge{display:inline-flex;align-items:center;padding:4px 1px;margin:-4px 0}
 /* 10-07 用户定的圆环：外径 14px（和字一样高）、线宽 2px（中线半径 6），外沿落在整像素上不发虚。
-   显卡段：从正下方往左、过顶、到右边，约占整圈 70%。空闲时整段灰；开始工作就有一段红从起点往上爬，爬到哪 = 占用多少。
-   内存段：固定在右下角约 30%，灰白色（比显卡空闲的灰亮），不表示百分比，只有两种状态：正常灰白，快满了整段变黄。两段之间留细缝。 */
+   显卡段：从正下方往左、过顶、到右边，占整圈 70%。空闲时整段灰；开始工作就有一段红从起点往上爬，爬到哪 = 占用多少。
+   内存段：固定在右下角 30%，灰白色（比显卡空闲的灰亮），不表示百分比，只有两种状态：正常灰白，快满了整段变黄。整圈连着、不留缝（10-07 用户：断开不清晰）。 */
 #wk em .gauge svg{width:16px;height:16px;display:block;overflow:visible}
-#wk em .gauge path{fill:none;stroke-width:2;stroke-linecap:butt}
-#wk em .gauge .gt{stroke:rgba(255,255,255,.2)}   /* 显卡段的底（空闲时的灰） */
+#wk em .gauge path,#wk em .gauge circle{fill:none;stroke-width:2;stroke-linecap:butt}
+#wk em .gauge .gt{stroke:rgba(255,255,255,.2)}   /* 底：一整圈一笔画完（显卡空闲时的灰），内存段和红段都叠在它上面，段与段交界处不会透出暗缝 */
 #wk em .gauge .gv{stroke:#e5484d;stroke-dasharray:100 200;transition:stroke-dashoffset .9s cubic-bezier(.33,1,.68,1)}   /* 显卡在工作的那段红：0.9 秒先快后慢滑到新位置（数据每 2 秒来一次，跟得上又不一顿一顿）；空隙留到 200，0% 时末端不漏亮点 */
 #wk em .gauge .mm{stroke:#c4c4c9;transition:stroke .6s ease}   /* 内存段：灰白 */
 #wk em .gauge .mm.warn{stroke:#f5a524}   /* 内存快满：整段变琥珀黄，0.6 秒渐变 */
@@ -1126,11 +1126,11 @@ function wkSel() { const w = document.getElementById('wk'), s = getSelection(); 
 // 量一段字在 el 里的宽度（px）：临时换上字、读 scrollWidth、再换回来
 function wkMeasure(el, t) { const o = el.textContent; el.textContent = t; const w = el.scrollWidth; el.textContent = o; return w; }
 const gaugeLast = {};   // 圆环上次的样子（显卡红段画到哪、内存黄没黄）：这一行被重建时接着显示，不从 0 重来
-// 圆环的两段（位置按「从正下方顺时针走一圈 = 100」算）：显卡 2→68（约 70%），内存 72→98（右下角约 30%），中间各留 4 的缝
-const GAUGE_G = 'M7.248 13.953A6 6 0 1 1 13.429 5.445', GAUGE_M = 'M13.894 6.876A6 6 0 0 1 8.752 13.953';
+// 圆环是一整圈、不断开（位置按「从正下方顺时针走一圈 = 100」算）：显卡 0→70，内存 70→100（右下角 30%）
+const GAUGE_G = 'M8.000 14.000A6 6 0 1 1 13.706 6.146', GAUGE_M = 'M13.706 6.146A6 6 0 0 1 8.000 14.000';
 function gpuPaint() {
   const em = document.querySelector('#wk em'); if (!em || wkSel()) return;
-  if (!em.firstChild) em.innerHTML = `<span class="gauge"><svg viewBox="0 0 16 16" role="img"><path class="gt" d="${GAUGE_G}"/><path class="gv" d="${GAUGE_G}" pathLength="100" style="stroke-dashoffset:100"/><path class="mm" d="${GAUGE_M}"/></svg></span>`;
+  if (!em.firstChild) em.innerHTML = `<span class="gauge"><svg viewBox="0 0 16 16" role="img"><circle class="gt" cx="8" cy="8" r="6"/><path class="mm" d="${GAUGE_M}"/><path class="gv" d="${GAUGE_G}" pathLength="100" style="stroke-dashoffset:100"/></svg></span>`;
   const ga = em.querySelector('.gauge'), gv = ga.querySelector('.gv'), mm = ga.querySelector('.mm'), d = gpuD || {}, f1 = (v) => Number(v).toFixed(1), tips = [];
   if (!ga._init) {   // 这一行刚建好：先不带动画摆回上次的样子；第一次打开界面则从 0 开始、下一帧再长到实际值
     ga._init = true;
@@ -1138,7 +1138,7 @@ function gpuPaint() {
     else ga.getBoundingClientRect();
   }
   ga.style.display = d.total || d.memTotal ? '' : 'none';   // 一项数据都没有时整个圆环不出现，不留一个空圈
-  gv.style.display = ga.querySelector('.gt').style.display = d.total ? '' : 'none'; mm.style.display = d.memTotal ? '' : 'none';
+  gv.style.display = d.total ? '' : 'none'; mm.style.display = d.memTotal ? '' : 'none';
   if (d.total) {
     const u = Math.round(Math.max(0, Math.min(100, Number(d.util) || 0)));
     const busy = gaugeLast.busy ? u >= 10 : u >= 20;   // 20% 以上算开始工作（和提示里「运算中」同一个标准），降到 10% 以下才算空闲：在门槛附近抖时红段不会一闪一闪
