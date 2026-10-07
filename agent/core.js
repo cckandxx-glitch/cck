@@ -562,12 +562,14 @@ ${memory() ? `记住的关于用户的事：\n${memory()}\n` : ''}规则：
   async function chatOnce(extraOpts, noTools) {
     abortCtl = new AbortController();
     let stalled = false, stallT; const arm = (ms) => { clearTimeout(stallT); stallT = setTimeout(() => { stalled = true; abortCtl.abort(); }, ms); };   // 等第一个字最多 5 分钟（冷启动加载大模型要久），出字以后 2 分钟没动静就当它挂了
+    // 学习模式：单次回答最多 5 分钟，到点就中断，这一步算失败、自动重试（10-07：一次回答卡了 600 多秒，显卡 100% GPU，是模型在一直往下写停不下来）
+    const capT = lean ? setTimeout(() => { stalled = true; abortCtl.abort(); }, 300000) : null;
     try { arm(300000); return await chatOnceRun(extraOpts, arm, noTools); }
     catch (e) { if (stalled && e.name === 'AbortError') throw new Error('模型太久没有响应，已中断。点这行后面的「重试」再试一次。'); throw e; }
-    finally { clearTimeout(stallT); }
+    finally { clearTimeout(stallT); clearTimeout(capT); }
   }
   async function chatOnceRun(extraOpts, arm, noTools) {
-    const body = { model: cfg.model, messages: sendMsgs(), ...(noTools ? {} : { tools: allTools() }), stream: true, think: lean ? !!cfg.learnThink : cfg.think, keep_alive: -1, options: { num_ctx: ctxN(), ...(extraOpts || {}) } };
+    const body = { model: cfg.model, messages: sendMsgs(), ...(noTools ? {} : { tools: allTools() }), stream: true, think: lean ? !!cfg.learnThink : cfg.think, keep_alive: -1, options: { num_ctx: ctxN(), ...(lean ? { num_predict: cfg.learnPredict || 4096 } : {}), ...(extraOpts || {}) } };   // 学习时一次最多写 4096 个词元，防止模型复读停不下来
     let r;
     for (let tryN = 0; ; tryN++) {   // Ollama 推理进程偶尔崩一下（500 / 连不上），自己会重启：等几秒重试一次，别让用户重发
       try { r = await fetch(cfg.ollama + '/api/chat', { method: 'POST', signal: abortCtl.signal, body: JSON.stringify(body) }); }
