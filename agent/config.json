@@ -7,7 +7,7 @@
   "keysFile": "D:/ai网站/CRM/ai.secret",
   "online": true,
   "think": true,
-  "numCtx": 131072,
+  "numCtx": 32768,
   "maxSteps": 60000,
   "proxy": "",
   "proxyFallback": "http://127.0.0.1:10808",

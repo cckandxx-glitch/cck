@@ -285,18 +285,32 @@ async function runLearnLoop(firstText) {
   notice('学习循环开始：每轮学完自动开下一轮，只在聊天框汇报进度。说"停止学习"或点急停才停。');
   try {
     if ((await pw.status()).state === 'off') bootNotice();
-    let first = true;
+    let first = true, fails = 0;
     while (learn.on) {
       learn.round++;
       core.resetStop();
       const prompt = first ? firstText : LEARN_PROMPT();
       first = false;
       if (learn.round > 1) notice('—— 学习循环第 ' + learn.round + ' 轮开始 ——');
-      try { await core.turn(prompt); } catch (e) { if (e.name !== 'StopError') notice('学习循环出错：' + e.message); }
+      const before = core.getHistory();
+      let failed = false;
+      try { await core.turn(prompt); fails = 0; } catch (e) { if (e.name !== 'StopError') { failed = true; fails++; notice('学习循环出错：' + e.message); } }
       if (!learn.on) break;
       if (learn.stopped) break;
-      // 本轮结束，等 2 秒喘口气再开下一轮（期间说"停止学习"或急停都能打断）
-      for (let i = 0; i < 20 && learn.on; i++) await new Promise((r) => setTimeout(r, 100));
+      let waitMs = 2000;   // 本轮结束，等 2 秒喘口气再开下一轮（期间说"停止学习"或急停都能打断）
+      if (failed) {
+        // 出错的这一轮没有回答：把它留下的提示词撤掉，否则每次失败都多压一条，下一轮更慢、更容易再超时（10-06 连挂 21 轮就是这样）
+        core.setMessages(before);
+        if (fails >= 3) {   // 连续失败多半是上下文太长、模型处理不动：先压缩；压缩也失败就清空学习上下文（进度都在自学计划和知识库文件里，不会丢）
+          let ok = false;
+          try { ok = (await core.compactNow()) > 0; } catch (e) {}
+          if (!ok) core.setMessages([]);
+          notice('学习循环连续出错 ' + fails + ' 次，已' + (ok ? '压缩' : '清空') + '对话上下文，接着学。');
+          fails = 0;
+        }
+        waitMs = Math.min(300000, 30000 * Math.max(1, fails));   // 等一会再试，给 Ollama 恢复的时间，别一出错就连环重试
+      }
+      for (let i = 0; i < waitMs / 100 && learn.on; i++) await new Promise((r) => setTimeout(r, 100));
     }
   } finally {
     learn.on = false;
