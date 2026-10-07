@@ -41,7 +41,7 @@ const LEARNF = path.join(__dirname, 'learn.json');
 const saveLearn = (on) => { try { if (on) fs.writeFileSync(LEARNF, JSON.stringify({ on: true, round: learn.round, since: learn.since || Date.now() })); else if (fs.existsSync(LEARNF)) fs.unlinkSync(LEARNF); } catch (e) {} };
 saveLearn(false); process.on('exit', () => saveLearn(false));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const LEARN_PROMPT = () => '（学习第 ' + learn.round + ' 轮：按自学计划学 1~2 个主题，存进知识库。最后只写一行：学了什么 → 存在哪 → 下一轮学什么。）';
+const LEARN_PROMPT = () => '（学习第 ' + learn.round + ' 轮：按自学计划学 1~2 个主题，存进知识库。最后只写一行（不超过 60 字），格式：学了 XX；存进 XX；下一轮 XX。）';
 function stopLearn(reason) {
   if (!learn.on) return;
   learn.on = false; learn.stopped = true; learn.resumable = true; learn.inbox = []; saveLearn(false);
