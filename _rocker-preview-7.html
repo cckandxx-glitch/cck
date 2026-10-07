@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>一个开关三个功能</title>
+<style>
+:root{
+  --bg:#212121; --side:#282828; --pill:#2c2c2c; --line:rgba(255,255,255,.08);
+  --ink:#fff; --ink2:#e2e2e5; --mute:#97979e;
+  --ok:#8bd5a8; --red:#c8372d; --warn:#ff7b72;
+  --font:"Inter","PingFang SC","Microsoft YaHei",sans-serif;
+  --slow:1;
+}
+body{margin:0;background:var(--bg);color:var(--ink2);font:14px/1.5 var(--font);padding:24px 16px 60px}
+h1{font-size:22px;color:var(--ink);margin:0 0 4px;font-weight:600}
+.sub{color:var(--mute);margin:0 0 18px;font-size:13px;max-width:920px}
+.bar{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;margin-bottom:22px;position:sticky;top:0;background:var(--bg);padding:10px 0;z-index:5;border-bottom:1px solid var(--line)}
+.seg{display:inline-flex;background:var(--pill);border-radius:8px;padding:2px}
+.seg button{border:0;background:none;color:var(--mute);font:inherit;font-size:13px;padding:5px 10px;border-radius:6px;cursor:pointer}
+.seg button.on{background:rgba(255,255,255,.12);color:var(--ink)}
+.lab{color:var(--mute);font-size:13px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:14px}
+.card{background:var(--side);border-radius:12px;padding:16px 16px 14px;display:flex;flex-direction:column}
+.card h2{margin:0;font-size:15px;color:var(--ink);font-weight:600}
+.card h2 b{display:inline-block;width:30px;color:var(--mute);font-weight:600}
+.card .src{margin:4px 0 0 30px;color:var(--ink2);font-size:12.5px}
+.card p{margin:4px 0 0 30px;color:var(--mute);font-size:12.5px;min-height:74px}
+.stage{height:150px;display:flex;align-items:center;justify-content:center}
+.stage .sx{--u:3px}
+.cap{color:var(--mute);font-size:12px;text-align:center;margin-top:6px}
+.hd{height:48px;display:flex;align-items:center;gap:8px;padding:0 16px;background:#303030;border-radius:8px;margin-top:6px}
+.hd .t{font-size:13.5px;font-weight:500;color:var(--ink);margin-right:8px;white-space:nowrap}
+.hd .g{flex:1}
+.hd .ic{width:34px;height:34px;border-radius:8px;border:0;background:transparent;color:var(--mute);cursor:pointer;display:grid;place-items:center;padding:0}
+.hd .ic:hover{background:#2f2f2f;color:var(--ink)}
+.hd .sx{position:relative;top:1.2px;left:8px}
+.tip{color:var(--mute);font-size:12px;margin:6px 2px 0;min-height:18px}
+.tip b{font-weight:500;color:var(--ink2)}
+
+/* ============ 共用：外框和记号（同 A：平涂、1px 细边、颜色只点在当前位置的记号上） ============ */
+.sx{--u:1px;--dur:170ms;--ease:cubic-bezier(.4,0,.2,1);--on:var(--ok);--off:var(--warn);--stp:var(--warn);
+  position:relative;display:inline-block;box-sizing:border-box;height:calc(24.8*var(--u));border-radius:calc(7.2*var(--u));
+  background:#242424;box-shadow:inset 0 0 0 1px rgba(255,255,255,.10);cursor:pointer;flex:none;line-height:0;user-select:none;-webkit-tap-highlight-color:transparent}
+body[data-offc=none] .sx{--off:var(--mute)}
+.sx:focus-visible{outline:2px solid #8ab4ff;outline-offset:2px}
+.gI,.gO,.gS{position:absolute;top:50%;left:var(--x);transform:translate(-50%,-50%);color:var(--mk,var(--mute));transition:color calc(var(--dur)*var(--slow)) var(--ease),opacity calc(var(--dur)*var(--slow)) var(--ease)}
+.gI{width:calc(1.6*var(--u));height:calc(8*var(--u));border-radius:calc(.8*var(--u));background:currentColor}
+.gO{width:calc(8*var(--u));height:calc(8*var(--u));border-radius:50%;box-sizing:border-box;border:calc(1.6*var(--u)) solid currentColor}
+.gS{width:calc(7.2*var(--u));height:calc(7.2*var(--u));border-radius:calc(1.2*var(--u));background:currentColor}
+.sx[data-p="0"] .gO{--mk:var(--off)}
+.sx[data-p="1"] .gI{--mk:var(--on)}
+.sx[data-p="2"] .gS{--mk:var(--stp)}
+.sx.boot .gI{animation:boot 1s ease-in-out infinite}
+.sx[data-p="2"] .gS{animation:boot .7s ease-in-out infinite}
+.sx.nostop .gS{opacity:.35}
+@keyframes boot{50%{opacity:.35}}
+@keyframes nudge{30%{transform:translateX(calc(1.6*var(--u)))}70%{transform:translateX(calc(-.8*var(--u)))}}
+.sx.deny .act{animation:nudge .22s ease}
+
+/* J 三位选择开关：一个滑块在 O · I · ■ 三格里走，■ 是弹回位 */
+.J{width:calc(62.4*var(--u))}
+.J .act{position:absolute;top:calc(2.4*var(--u));bottom:calc(2.4*var(--u));left:calc(2.4*var(--u));width:calc(19.2*var(--u));border-radius:calc(4.8*var(--u));
+  background:#4a4a4a;box-shadow:inset 0 1px 0 rgba(255,255,255,.10),0 1px 1px rgba(0,0,0,.35);
+  transform:translateX(calc(var(--p)*19.2*var(--u)));transition:transform calc(var(--dur)*var(--slow)) var(--ease)}
+.J .gO{--x:calc(12*var(--u))} .J .gI{--x:calc(31.2*var(--u))} .J .gS{--x:calc(50.4*var(--u))}
+.J .h{position:absolute;inset:0}
+/* 滑块盖住的那一格，记号浮在滑块上面 */
+
+/* K 旋钮：凸轮开关那种带指针的圆钮，指左 = O，朝上 = I，指右 = ■（弹回） */
+.K{width:calc(62.4*var(--u))}
+.K .act{position:absolute;top:calc(2.4*var(--u));left:calc(21.2*var(--u));width:calc(20*var(--u));height:calc(20*var(--u));border-radius:50%;
+  background:#4a4a4a;box-shadow:inset 0 1px 0 rgba(255,255,255,.12),0 1px 1px rgba(0,0,0,.4);
+  transform:rotate(calc((var(--p) - 1)*90deg));transition:transform calc(var(--dur)*var(--slow)) var(--ease)}
+.K .act::after{content:"";position:absolute;left:50%;top:calc(2*var(--u));width:calc(2.4*var(--u));height:calc(8*var(--u));margin-left:calc(-1.2*var(--u));border-radius:calc(1.2*var(--u));
+  background:var(--ptr,var(--mute));transition:background-color calc(var(--dur)*var(--slow)) var(--ease)}
+.K[data-p="0"]{--ptr:var(--off)} .K[data-p="1"]{--ptr:var(--on)} .K[data-p="2"]{--ptr:var(--stp)}
+.K.boot .act::after{animation:boot 1s ease-in-out infinite}
+.K .gO{--x:calc(10.4*var(--u))} .K .gS{--x:calc(52*var(--u))} .K .gI{display:none}
+
+/* L 跷板加中键：A 的跷板，折线正中嵌一颗急停钮 */
+.L{width:calc(44.8*var(--u))}
+.L .act{position:absolute;inset:calc(2.4*var(--u));display:flex;border-radius:calc(4.8*var(--u));overflow:hidden}
+.L .hh{flex:1;background:#4a4a4a;box-shadow:inset 0 1px 0 rgba(255,255,255,.10);transition:background-color calc(var(--dur)*var(--slow)) var(--ease)}
+.L[data-p="0"] .hh:first-child,.L:not([data-p="0"]) .hh:last-child{background:#2a2a2a;box-shadow:inset 0 1px 0 rgba(0,0,0,.35)}
+.L .gO{--x:calc(10*var(--u))} .L .gI{--x:calc(34.8*var(--u))}
+.L[data-p="2"] .gI{--mk:var(--on)}
+.L .gS{--x:50%;width:calc(10.4*var(--u));height:calc(10.4*var(--u));border-radius:50%;background:#3a3a3a;box-shadow:0 0 0 calc(1.2*var(--u)) #242424,inset 0 1px 0 rgba(255,255,255,.12);color:transparent;opacity:1}
+.L:not(.nostop) .gS{background:var(--red)}
+.L.nostop .gS{opacity:1}
+.L[data-p="2"] .gS{animation:boot .7s ease-in-out infinite}
+.L .gO,.L .gI{z-index:1}
+</style>
+</head>
+<body data-offc="red">
+<h1>一个开关，三个功能：关 · 开 · 急停</h1>
+<p class="sub">三版都是一个外框、一个操作件。■ 那一档参考汽车点火锁的「启动」档：拧过去就执行，松手自己弹回「开」。所以急停只是停掉当前任务，AI 还开着。没开 AI 或者没有任务在跑时，■ 是暗的，拨过去会被挡回来。点开关的左、中、右三段试，键盘 Esc 照旧是急停。</p>
+
+<div class="bar">
+  <span class="lab">模拟</span>
+  <span class="seg" id="busy"><button data-v="0" class="on">空闲</button><button data-v="1">有任务在跑</button></span>
+  <span class="lab">关的时候</span>
+  <span class="seg" id="offc"><button data-v="red" class="on">亮红</button><button data-v="none">不亮</button></span>
+  <span class="lab">速度</span>
+  <span class="seg" id="slow"><button data-v="1" class="on">正常</button><button data-v="5">慢放 ×5</button></span>
+</div>
+
+<div class="grid" id="grid"></div>
+
+<script>
+const V = [
+  ['J', '三位选择开关', '参考：机床电柜上的「手动–关–自动」三位选择开关；点火锁的弹回档。', '一个滑块在 O · I · ■ 三格里走。外框和 A 一样，滑块就是 A 那块跷板的质感。最像「一个开关」，也最好认：滑块在哪，就是什么状态。'],
+  ['K', '旋钮', '参考：Kraus & Naimer 凸轮开关、电厂控制室的手柄式控制开关、博朗的圆钮。', '一颗带指针的圆钮：指向左边的 O 是关，朝上是开，指向右边的 ■ 是急停，转过去自己弹回朝上。指针本身变色：红、绿、红闪。最有设备感。'],
+  ['L', '跷板加中键', '参考：A 的跷板；带中央按钮的跷板（相机变焦键、对讲机）。', '就是 A，只在折线正中嵌一颗圆形急停钮。有任务在跑时钮是红的，空闲时是灰的。最小，但中间那颗钮实际只有约 10px，比较难点准。'],
+];
+const GEAR = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></svg>';
+const MARKS = '<i class="gO"></i><i class="gI"></i><i class="gS"></i>';
+const sx = (v) => v === 'L'
+  ? `<span class="sx L" role="group" tabindex="0" aria-label="AI 电源和急停"><span class="act"><span class="hh"></span><span class="hh"></span></span>${MARKS}</span>`
+  : `<span class="sx ${v}" role="slider" tabindex="0" aria-label="AI 电源和急停" aria-valuemin="0" aria-valuemax="2"><span class="act"></span>${MARKS}</span>`;
+document.getElementById('grid').innerHTML = V.map(([v, n, s, d]) => `<div class="card" data-v="${v}"><h2><b>${v}</b>${n}</h2><div class="src">${s}</div><p>${d}</p><div class="stage">${sx(v)}</div><div class="hd"><span class="t">对话</span><span class="g"></span><button class="ic" title="设置">${GEAR}</button>${sx(v)}</div><div class="tip"></div><div class="cap">↑ 顶栏实际大小</div></div>`).join('');
+
+const S = {}; let busy = false;
+const get = (v) => S[v] || (S[v] = { pw: 'off', stopping: false, t: 0 });
+function paint(card) {
+  const v = card.dataset.v, s = get(v), on = s.pw !== 'off', p = s.stopping ? 2 : on ? 1 : 0;
+  card.querySelectorAll('.sx').forEach((x) => {
+    x.dataset.p = p; x.style.setProperty('--p', p); x.setAttribute('aria-valuenow', p);
+    x.classList.toggle('boot', s.pw === 'boot' && !s.stopping);
+    x.classList.toggle('nostop', !(on && busy));
+    x.title = s.stopping ? '正在急停…' : s.pw === 'boot' ? 'AI 上线中…' : (on ? 'AI 已上线' : 'AI 已下线') + (on && busy ? ' · 有任务在跑，拨到 ■ 急停' : '');
+  });
+  card.querySelector('.tip').innerHTML = '状态：<b>' + (s.stopping ? '正在急停…（停完弹回 I）' : s.pw === 'boot' ? 'AI 上线中…' : on ? 'AI 已上线' : 'AI 已下线') + '</b>' + (on && busy && !s.stopping ? ' · 有任务在跑' : '');
+}
+const paintAll = () => document.querySelectorAll('.card').forEach(paint);
+function deny(x) { x.classList.remove('deny'); void x.offsetWidth; x.classList.add('deny'); }
+function go(card, x, pos) {
+  const v = card.dataset.v, s = get(v);
+  if (s.stopping) return;
+  if (pos === 0 && s.pw !== 'off') { clearTimeout(s.t); s.pw = 'off'; }
+  else if (pos === 1 && s.pw === 'off') { s.pw = 'boot'; s.t = setTimeout(() => { s.pw = 'on'; paint(card); }, 3000); }
+  else if (pos === 2) {
+    if (s.pw === 'off' || !busy) return deny(x);
+    s.stopping = true; setTimeout(() => { s.stopping = false; busy = false; setBusySeg(); paintAll(); }, 1500);
+  }
+  paint(card);
+}
+function setBusySeg() { document.querySelectorAll('#busy button').forEach((b) => b.classList.toggle('on', b.dataset.v === (busy ? '1' : '0'))); }
+paintAll();
+
+document.addEventListener('click', (e) => {
+  const x = e.target.closest('.sx');
+  if (x) {
+    const card = x.closest('.card'), r = x.getBoundingClientRect(), f = (e.clientX - r.left) / r.width;
+    let pos;
+    if (x.classList.contains('L')) {   // L：中间一颗钮 = 急停，两半 = 关 / 开
+      const c = x.querySelector('.gS').getBoundingClientRect();
+      pos = Math.hypot(e.clientX - (c.left + c.width / 2), e.clientY - (c.top + c.height / 2)) <= c.width * .75 ? 2 : f < .5 ? 0 : 1;
+    } else pos = f < 1 / 3 ? 0 : f < 2 / 3 ? 1 : 2;
+    go(card, x, pos); return;
+  }
+  const b = e.target.closest('.seg button'); if (!b) return;
+  b.parentNode.querySelectorAll('button').forEach((y) => y.classList.toggle('on', y === b));
+  const id = b.parentNode.id, val = b.dataset.v;
+  if (id === 'slow') document.documentElement.style.setProperty('--slow', val);
+  else if (id === 'busy') busy = val === '1';
+  else document.body.dataset[id] = val;
+  paintAll();
+});
+document.addEventListener('keydown', (e) => {
+  const x = e.target.closest && e.target.closest('.sx'); if (!x) return;
+  const card = x.closest('.card'), p = +x.dataset.p;
+  if (e.key === 'ArrowLeft') { e.preventDefault(); go(card, x, Math.max(0, p - 1)); }
+  else if (e.key === 'ArrowRight') { e.preventDefault(); go(card, x, Math.min(2, p + 1)); }
+});
+</script>
+</body>
+</html>

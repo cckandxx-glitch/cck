@@ -1,0 +1,39 @@
+<!doctype html><meta charset="utf-8"><title>8 球科学造型预览</title>
+<style>
+body{background:#17171a;color:#9a9aa2;font:14px "Microsoft YaHei",sans-serif;margin:0;padding:36px;display:grid;grid-template-columns:repeat(4,200px);gap:36px 40px}
+.c h3{color:#e2e2e5;font-weight:500;margin:0 0 4px;font-size:15px}.c p{margin:0 0 10px;font-size:12px;line-height:1.5;height:36px}
+.big{width:200px;height:200px}.sm{display:flex;align-items:center;gap:8px;margin-top:8px}.sm i{width:22px;height:22px;display:block}
+svg{width:100%;height:100%;display:block;overflow:visible}circle{fill:#e5484d}
+</style>
+<div id="g" style="display:contents"></div>
+<script>
+const TP=Math.PI*2, R=[];
+const add=(n,d,f)=>R.push({n,d,f});
+// 1 DNA 双螺旋：两条链，各 4 个球，相差半圈，一起慢慢向上流动
+add('1 DNA 双螺旋','两条链、每条 4 个，沿轴向上缓缓流动',t=>{const o=[];for(let k=0;k<4;k++)for(const s of[0,Math.PI]){const y=((k*.5+t*.18)%2)-1,a=y*3.2+s;o.push([.55*Math.cos(a),y*.95,.55*Math.sin(a)])}return o});
+// 2 三叶结：数学里最简单的纽结，8 个球沿着它跑
+add('2 三叶结','数学里最简单的纽结，8 个球沿着它追',t=>Array.from({length:8},(_,k)=>{const u=k*TP/8+t*.6;return[(Math.sin(u)+2*Math.sin(2*u))/3.1,(Math.cos(u)-2*Math.cos(2*u))/3.1,-Math.sin(3*u)/1.6]}));
+// 3 原子：中间 1 个原子核，7 个电子在三个倾斜的轨道上
+add('3 原子','1 个核 + 7 个电子，三个倾斜轨道',t=>{const o=[[0,0,0]],cfg=[[0,3,1.0],[1.05,2,-1.3],[2.1,2,1.7]];cfg.forEach(([tilt,n,w])=>{for(let j=0;j<n;j++){const p=w*t+j*TP/n,x=.92*Math.cos(p),z=.92*Math.sin(p);o.push([x*Math.cos(tilt),x*Math.sin(tilt),z])}});return o});
+// 4 洛伦兹吸引子：混沌，真的在解方程，8 个球在蝴蝶形轨道上飘
+const LZ=Array.from({length:8},(_,k)=>[1+k*.7,1+k*.3,20+k*.8]);let lzT=0;
+function lorenzStep(dt){LZ.forEach(p=>{const[x,y,z]=p,dx=10*(y-x),dy=x*(28-z)-y,dz=x*y-8/3*z;p[0]+=dx*dt;p[1]+=dy*dt;p[2]+=dz*dt})}
+for(let i=0;i<3000;i++)lorenzStep(.004);
+add('4 洛伦兹吸引子','混沌理论的蝴蝶；这里是真在解方程',t=>{const dtf=t-lzT;lzT=t;if(dtf>0&&dtf<.5)for(let i=0;i<Math.ceil(dtf/.004);i++)lorenzStep(.004);return LZ.map(p=>[p[0]/20,p[1]/26,(p[2]-25)/20])});
+// 5 双纽线 ∞：数学里的无穷符号，8 个球排成一列沿着它走
+add('5 无穷 ∞','双纽线，8 个球沿着它走',t=>Array.from({length:8},(_,k)=>{const u=k*TP/8+t*.8,d=1+Math.sin(u)**2;return[1.05*Math.cos(u)/d,.22*Math.sin(2*u),1.05*Math.sin(u)*Math.cos(u)/d*1.6]}));
+// 6 驻波：物理里的两端固定的弦，8 个球上下振
+add('6 驻波','两端固定的弦，两个半波长，上下振动',t=>Array.from({length:8},(_,k)=>{const u=k/7;return[-.95+1.9*u,.75*Math.sin(TP*u)*Math.cos(t*3),0]}));
+// 7 黄金螺旋：向日葵种子/松果的排列，黄金角 137.5°
+add('7 黄金角螺旋','向日葵、松果的排列，每个相隔 137.5°',t=>Array.from({length:8},(_,k)=>{const a=k*2.399963;return[.4*Math.sqrt(k+.6)*Math.cos(a),-.85+k*.24,.4*Math.sqrt(k+.6)*Math.sin(a)]}));
+// 8 晶格：简单立方晶体，8 个原子在平衡位置附近热振动
+add('8 晶格','简单立方晶体，原子在原位热振动',t=>Array.from({length:8},(_,k)=>[(k&1?.58:-.58)+.07*Math.sin(t*9+k*1.7),(k&2?.58:-.58)+.07*Math.sin(t*8+k*2.3),(k&4?.58:-.58)+.07*Math.sin(t*10+k*.9)]));
+const els=[],g=document.getElementById('g');
+R.forEach(r=>{const c=document.createElement('div');c.className='c';c.innerHTML='<h3>'+r.n+'</h3><p>'+r.d+'</p><div class="big"></div><div class="sm"><i></i><span>正在思考</span></div>';g.appendChild(c);
+ [c.querySelector('.big'),c.querySelector('.sm i')].forEach(b=>{b.innerHTML='<svg viewBox="0 0 24 24">'+'<circle r="1.7"/>'.repeat(8)+'</svg>';els.push([b,r.f])})});
+const t0=performance.now();
+(function f(now){requestAnimationFrame(f);const t=(now-t0)/1000,A=t*1.5,B=.5,cA=Math.cos(A),sA=Math.sin(A),cB=Math.cos(B),sB=Math.sin(B);
+ const cache=new Map();
+ els.forEach(([b,fn])=>{let P=cache.get(fn);if(!P){P=fn(t);cache.set(fn,P)}const cs=b.querySelectorAll('circle');
+  P.forEach(([x,y,z],i)=>{const x1=x*cA+z*sA,z1=-x*sA+z*cA,y1=y*cB-z1*sB,z2=y*sB+z1*cB,c=cs[i];c.setAttribute('cx',12+x1*8.8);c.setAttribute('cy',12+y1*8.8);c.setAttribute('r',(1.6+.6*z2).toFixed(2));c.setAttribute('opacity',(.72+.28*z2).toFixed(2))})})})(performance.now());
+</script>

@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><title>三点菜单方案</title>
+<style>
+:root{--bg:#212121;--line:rgba(255,255,255,.08);--ink:#fff;--ink2:#e2e2e5;--mute:#97979e;--accent:#f2f2f3;--accent-ink:#1b1b1c;--ok:#8bd5a8;--font:"Inter","PingFang SC","Microsoft YaHei",sans-serif}
+*{box-sizing:border-box}
+body{margin:0;background:#0d0d0e;font-family:var(--font);color:var(--ink);padding:24px}
+.wrap{display:flex;gap:24px;flex-wrap:wrap;align-items:flex-start}
+.win{width:340px;height:420px;background:var(--bg);border:1px solid rgba(255,255,255,.12);border-radius:14px;position:relative;overflow:hidden}
+.win h2{position:absolute;bottom:14px;left:16px;margin:0;font-size:13px;font-weight:500;color:var(--mute)}
+.top{height:48px;display:flex;align-items:center;justify-content:flex-end;padding-right:6px}
+.dots{width:36px;height:36px;border-radius:8px;display:grid;place-items:center;background:#2f2f2f;color:#fff}
+.dots svg{transform:translateX(2px)}
+.m{position:absolute;top:54px;right:6px;background:#343436;border-radius:12px;padding:6px;box-shadow:0 12px 32px rgba(0,0,0,.55);user-select:none}
+
+/* 共用：开关 */
+.tg{width:30px;height:18px;border-radius:9px;background:rgba(255,255,255,.16);position:relative;flex:none;transition:background .15s}
+.tg::after{content:"";position:absolute;top:3px;left:3px;width:12px;height:12px;border-radius:50%;background:#bdbdc2;transition:transform .15s,background .15s}
+.on .tg{background:var(--accent)}
+.on .tg::after{transform:translateX(12px);background:var(--accent-ink)}
+
+/* A 开关列表 */
+.A{width:208px}
+.A .r{height:36px;display:flex;align-items:center;gap:10px;padding:0 10px;border-radius:8px;font-size:13px;color:var(--ink2);cursor:pointer}
+.A .r:hover{background:rgba(255,255,255,.07)}
+.A .r b{flex:1;font-weight:400}
+.A .r em{font-style:normal;color:var(--mute);font-size:12px}
+.A .r.ai em{color:var(--mute)}
+.A .r.ai.on em{color:var(--ok)}
+.A hr{border:0;height:1px;background:var(--line);margin:6px 4px}
+
+/* B 带说明 */
+.B{width:268px}
+.B .hd{display:flex;align-items:center;gap:8px;padding:10px 10px 12px}
+.B .hd i{width:7px;height:7px;border-radius:50%;background:var(--mute)}
+.B .hd.on i{background:var(--ok)}
+.B .hd b{flex:1;font-size:13px;font-weight:500}
+.B .hd button{height:26px;padding:0 12px;border:0;border-radius:6px;background:rgba(255,255,255,.08);color:var(--ink);font:12px var(--font);cursor:pointer}
+.B .hd button:hover{background:rgba(255,255,255,.14)}
+.B hr{border:0;height:1px;background:var(--line);margin:0 4px 6px}
+.B .r{display:flex;align-items:center;gap:12px;padding:8px 10px;border-radius:8px;cursor:pointer}
+.B .r:hover{background:rgba(255,255,255,.07)}
+.B .r div{flex:1;min-width:0}
+.B .r b{display:block;font-size:13px;font-weight:400;color:var(--ink2);line-height:18px}
+.B .r small{display:block;font-size:12px;color:var(--mute);line-height:17px}
+
+/* C 操作区（SK4） */
+.C{width:220px}
+.C .hd{display:flex;align-items:center;gap:8px;height:40px;padding:0 6px 0 10px;margin-bottom:6px;border-radius:8px;background:rgba(255,255,255,.05)}
+.C .hd i{width:7px;height:7px;border-radius:50%;background:var(--mute)}
+.C .hd.on i{background:var(--ok)}
+.C .hd b{flex:1;font-size:13px;font-weight:500}
+.C .hd button{height:28px;padding:0 12px;border:0;border-radius:6px;background:var(--accent);color:var(--accent-ink);font:500 12px var(--font);cursor:pointer}
+.C .hd.on button{background:rgba(255,255,255,.10);color:var(--ink)}
+.C .g{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.C .k{height:56px;border-radius:8px;background:rgba(255,255,255,.05);padding:10px;display:flex;flex-direction:column;justify-content:space-between;cursor:pointer;font-size:13px;color:var(--mute)}
+.C .k:hover{background:rgba(255,255,255,.09)}
+.C .k u{display:block;width:14px;height:2px;border-radius:1px;background:rgba(255,255,255,.18)}
+.C .k.on{color:var(--ink)}
+.C .k.on u{background:var(--accent)}
+.note{color:var(--mute);font-size:13px;line-height:1.7;max-width:1100px;margin:0 0 18px}
+</style></head><body>
+<p class="note">点开关、点按键都能切换，悬停看效果。三点按钮位置和现在一样（右移 2px）。</p>
+<div class="wrap">
+
+<div class="win"><div class="top"><div class="dots"><svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg></div></div>
+<div class="m A">
+  <div class="r ai on"><b>AI</b><em>在线</em><span class="tg"></span></div>
+  <hr>
+  <div class="r on"><b>联网</b><span class="tg"></span></div>
+  <div class="r"><b>桌面</b><span class="tg"></span></div>
+  <div class="r on"><b>思考</b><span class="tg"></span></div>
+  <div class="r on"><b>自动模式</b><span class="tg"></span></div>
+</div><h2>A　开关列表</h2></div>
+
+<div class="win"><div class="top"><div class="dots"><svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg></div></div>
+<div class="m B">
+  <div class="hd on"><i></i><b>AI 在线</b><button>下线</button></div>
+  <hr>
+  <div class="r on"><div><b>联网</b><small>搜索、读网页、挖线索</small></div><span class="tg"></span></div>
+  <div class="r"><div><b>桌面</b><small>看屏幕、动鼠标键盘</small></div><span class="tg"></span></div>
+  <div class="r on"><div><b>思考</b><small>更准，但更慢</small></div><span class="tg"></span></div>
+  <div class="r on"><div><b>自动模式</b><small>开游戏自动下线，关了再上线</small></div><span class="tg"></span></div>
+</div><h2>B　带说明</h2></div>
+
+<div class="win"><div class="top"><div class="dots"><svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg></div></div>
+<div class="m C">
+  <div class="hd on"><i></i><b>AI 在线</b><button>下线</button></div>
+  <div class="g">
+    <div class="k on"><u></u>联网</div>
+    <div class="k"><u></u>桌面</div>
+    <div class="k on"><u></u>思考</div>
+    <div class="k on"><u></u>自动模式</div>
+  </div>
+</div><h2>C　操作区按键</h2></div>
+
+</div>
+<script>
+document.querySelectorAll('.A .r,.B .r,.C .k').forEach(e=>e.onclick=()=>{e.classList.toggle('on');if(e.classList.contains('ai'))e.querySelector('em').textContent=e.classList.contains('on')?'在线':'离线';});
+document.querySelectorAll('.B .hd button,.C .hd button').forEach(b=>b.onclick=()=>{const h=b.parentNode;h.classList.toggle('on');const o=h.classList.contains('on');h.querySelector('b').textContent=o?'AI 在线':'AI 离线';b.textContent=o?'下线':'上线';});
+</script>
+</body></html>

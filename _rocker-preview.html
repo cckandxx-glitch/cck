@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>跷板开关预览</title>
+<style>
+:root{
+  --bg:#212121; --side:#282828; --pill:#2c2c2c; --line:rgba(255,255,255,.08); --line2:rgba(255,255,255,.18);
+  --ink:#fff; --ink2:#e2e2e5; --mute:#97979e;
+  --font:"Inter","PingFang SC","Microsoft YaHei",sans-serif;
+  --slow:1;
+}
+body{margin:0;background:var(--bg);color:var(--ink2);font:14px/1.5 var(--font);padding:24px 16px 60px}
+h1{font-size:22px;color:var(--ink);margin:0 0 4px;font-weight:600}
+.sub{color:var(--mute);margin:0 0 18px;font-size:13px}
+.bar{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;margin-bottom:22px;position:sticky;top:0;background:var(--bg);padding:10px 0;z-index:5;border-bottom:1px solid var(--line)}
+.seg{display:inline-flex;background:var(--pill);border-radius:8px;padding:2px}
+.seg button{border:0;background:none;color:var(--mute);font:inherit;font-size:13px;padding:5px 10px;border-radius:6px;cursor:pointer}
+.seg button.on{background:rgba(255,255,255,.12);color:var(--ink)}
+.bar .lab{color:var(--mute);font-size:13px}
+.btn{border:0;background:rgba(255,255,255,.07);color:var(--ink2);font:inherit;font-size:13px;height:30px;padding:0 12px;border-radius:8px;cursor:pointer}
+.btn:hover{background:rgba(255,255,255,.12);color:var(--ink)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}
+.card{background:var(--side);border-radius:12px;padding:16px 16px 14px;display:flex;flex-direction:column}
+.card h2{margin:0;font-size:15px;color:var(--ink);font-weight:600}
+.card h2 b{display:inline-block;width:22px;color:var(--mute);font-weight:600}
+.card p{margin:4px 0 0 22px;color:var(--mute);font-size:12.5px;min-height:38px}
+.stage{height:150px;display:flex;align-items:center;justify-content:center}
+.stage .rk{--fs:34px}
+.pop{background:#2f2f2f;border-radius:10px;padding:6px;display:flex;flex-direction:column;gap:4px;width:200px;align-self:center}
+.row{display:flex;align-items:center;justify-content:space-between;height:34px;padding:0 10px 0 12px;border-radius:8px;background:rgba(255,255,255,.07);color:var(--ink2);font-size:13px}
+.row .rk{--fs:10px}
+.cap{color:var(--mute);font-size:12px;text-align:center;margin-top:6px}
+.src{margin-top:34px;color:var(--mute);font-size:12.5px;max-width:900px}
+.src a{color:var(--ink2)}
+
+/* ===== 跷板开关通用结构 ===== */
+.rk{
+  --on-c:#3dae6a; --off-c:#d84a4a; --neu:#777;
+  --frame:#ddd; --hole:#555; --body:#eee; --ang:14deg; --dur:170ms; --ease:cubic-bezier(.4,0,.2,1);
+  --fr-r:.42em; --hole-r:.3em; --rc-r:.22em; --dep:.6em; --fr-sh:0 .05em .14em rgba(0,0,0,.45);
+  --rc-sh:none; --pz:0em;
+  font-size:var(--fs,10px);background:none;border:0;padding:0;margin:0;cursor:pointer;display:inline-block;line-height:0;-webkit-tap-highlight-color:transparent
+}
+.rk:focus-visible{outline:2px solid #8ab4ff;outline-offset:.15em;border-radius:var(--fr-r)}
+.rk:active{--pz:-.1em}
+body[data-ind=g] .rk{--off-c:var(--neu)}
+body[data-ind=r] .rk{--on-c:#d84a4a;--off-c:var(--neu)}
+.fr{position:relative;display:block;width:3.6em;height:2em;border-radius:var(--fr-r);background:var(--frame);box-shadow:var(--fr-sh)}
+.hole{position:absolute;inset:.2em;border-radius:var(--hole-r);background:var(--hole);perspective:12em;box-shadow:inset 0 .05em .12em rgba(0,0,0,.5)}
+.rc{position:absolute;inset:.07em;border-radius:var(--rc-r);background:var(--body);box-shadow:var(--rc-sh);
+  transform-style:preserve-3d;transform:translateZ(var(--pz)) rotateY(var(--ang));
+  transition:transform calc(var(--dur) * var(--slow)) var(--ease)}
+.rk[aria-pressed=true] .rc{transform:translateZ(var(--pz)) rotateY(calc(var(--ang) * -1))}
+.wl,.wr{position:absolute;top:.04em;bottom:.04em;width:var(--dep);transition:box-shadow calc(var(--dur) * var(--slow))}
+.wr{right:0;transform-origin:100% 50%;transform:rotateY(-110deg);background:var(--on-c)}
+.wl{left:0;transform-origin:0 50%;transform:rotateY(110deg);background:var(--off-c)}
+.fc,.fc2{position:absolute;inset:0;border-radius:inherit;transform:translateZ(.005em);transition:opacity calc(var(--dur) * var(--slow)) var(--ease);pointer-events:none}
+/* 关：左端翘起、迎光；开：右端翘起 */
+.fc{background:linear-gradient(90deg,rgba(255,255,255,.22),rgba(255,255,255,0) 48%,rgba(0,0,0,.16));opacity:1}
+.fc2{background:linear-gradient(270deg,rgba(255,255,255,.22),rgba(255,255,255,0) 48%,rgba(0,0,0,.16));opacity:0}
+.rk[aria-pressed=true] .fc{opacity:0}
+.rk[aria-pressed=true] .fc2{opacity:1}
+.mk{position:absolute;top:50%;transform:translate(-50%,-50%) translateZ(.01em);color:rgba(255,255,255,.7);font:600 .62em/1 var(--font);display:none}
+
+/* A 象牙家用 */
+.v-a{--frame:linear-gradient(#f3eee3,#e2dccd);--hole:#a8a091;--body:#f1ecdf;--neu:#cfc7b6;--fr-sh:0 .05em .14em rgba(0,0,0,.5),inset 0 .03em 0 rgba(255,255,255,.7)}
+/* B 胶木 */
+.v-b{--frame:linear-gradient(#4a2f20,#2c1a10);--hole:#0f0805;--body:linear-gradient(#5a3624,#3b2216);--neu:#2a1810;--rc-sh:inset 0 .05em .04em rgba(255,255,255,.22);--ang:15deg}
+/* C Jung LS 990 */
+.v-c{--frame:#f6f6f3;--hole:#cfcfca;--body:#fbfbf9;--neu:#dcdcd6;--fr-r:.12em;--hole-r:.06em;--rc-r:.04em;--ang:8deg;--dur:140ms;--fr-sh:0 .04em .1em rgba(0,0,0,.4)}
+.v-c .hole{inset:.12em}
+/* D Braun 灰 */
+.v-d{--frame:#d9d9d5;--hole:#8f8f8b;--body:#3a3a3a;--neu:#555;--fr-r:.5em;--hole-r:.36em;--rc-r:.28em;--ang:12deg}
+/* E 黑色 I/O 船型 */
+.v-e{--frame:linear-gradient(#262626,#141414);--hole:#000;--body:linear-gradient(#262626,#0e0e0e);--neu:#222;--rc-sh:inset 0 .05em .03em rgba(255,255,255,.16);--ang:15deg}
+.v-e .mk{display:block}
+.v-e .mk.i{left:28%}.v-e .mk.o{left:72%}
+/* F 深色融入 */
+.v-f,.v-h,.v-i,.v-j{--frame:#1b1b1b;--hole:#0d0d0d;--body:#3a3a3a;--neu:#2a2a2a;--fr-sh:inset 0 0 0 1px rgba(255,255,255,.06);--ang:12deg}
+/* G 铝 */
+.v-g{--frame:linear-gradient(#d4d7db,#9da2a8);--hole:#4d5156;--neu:#7d8288;--body:repeating-linear-gradient(0deg,rgba(255,255,255,.06) 0 .02em,transparent .02em .05em),linear-gradient(#e9ebee,#b6bbc1);--rc-sh:inset 0 .04em 0 rgba(255,255,255,.7);--ang:12deg}
+/* H 回弹 */
+.v-h{--ease:cubic-bezier(.34,1.56,.64,1);--dur:300ms}
+/* I 咔哒 */
+.v-i{--ease:cubic-bezier(.9,0,.1,1.25);--dur:240ms}
+/* J 发光 */
+.v-j .wr{box-shadow:0 0 .5em var(--on-c)}
+.v-j .led{position:absolute;right:-.55em;top:50%;width:.22em;height:.22em;margin-top:-.11em;border-radius:50%;background:#333;transition:background calc(var(--dur)*var(--slow)),box-shadow calc(var(--dur)*var(--slow))}
+.v-j[aria-pressed=true] .led{background:var(--on-c);box-shadow:0 0 .35em var(--on-c)}
+.led{display:none}.v-j .led{display:block}
+
+/* K 侧面剖视 */
+.v-k .fr{background:none;box-shadow:none}
+.v-k .hole,.v-l .hole{display:none}
+.pf{display:none}
+.v-k .pf{display:block;position:absolute;inset:0}
+.pf .base{position:absolute;left:.1em;right:.1em;bottom:.25em;height:.18em;border-radius:.09em;background:#555}
+.pf .piv{position:absolute;left:50%;bottom:.43em;width:.5em;height:.4em;margin-left:-.25em;background:#555;clip-path:polygon(50% 0,100% 100%,0 100%)}
+.pf .bar2{position:absolute;left:.25em;right:.25em;top:.62em;height:.34em;border-radius:.06em;background:#cfcfcf;transform:rotate(9deg);transition:transform calc(var(--dur)*var(--slow)) var(--ease)}
+.v-k[aria-pressed=true] .pf .bar2{transform:rotate(-9deg)}
+.pf .bar2 i{position:absolute;top:0;bottom:0;width:.16em;transition:opacity calc(var(--dur)*var(--slow))}
+.pf .bar2 .pl{left:0;background:var(--off-c);border-radius:.06em 0 0 .06em}
+.pf .bar2 .pr{right:0;background:var(--on-c);border-radius:0 .06em .06em 0;opacity:0}
+.v-k[aria-pressed=true] .pf .bar2 .pl{opacity:0}
+.v-k[aria-pressed=true] .pf .bar2 .pr{opacity:1}
+
+/* L 线框 */
+.v-l .fr{background:none;box-shadow:inset 0 0 0 .06em #8a8a8f}
+.ln{display:none}
+.v-l .ln{display:block;position:absolute;inset:.22em;border-radius:.2em;overflow:hidden}
+.ln i{position:absolute;top:0;bottom:0;width:50%;background:rgba(255,255,255,.16);transition:transform calc(var(--dur)*var(--slow)) var(--ease)}
+.ln i{left:50%}
+.v-l[aria-pressed=true] .ln i{transform:translateX(-100%)}
+.ln b{position:absolute;top:0;bottom:0;width:.16em;transition:opacity calc(var(--dur)*var(--slow))}
+.ln .bl{left:0;background:var(--off-c)}
+.ln .br{right:0;background:var(--on-c);opacity:0}
+.v-l[aria-pressed=true] .ln .bl{opacity:0}
+.v-l[aria-pressed=true] .ln .br{opacity:1}
+</style>
+</head>
+<body data-ind="gr">
+<h1>跷板开关 · 12 个方案</h1>
+<p class="sub">左按＝开（右端翘起，露出右侧壁的颜色），右按＝关。大图点一下切换；下面一块是放进本地 AI 齿轮菜单里的实际大小。</p>
+
+<div class="bar">
+  <span class="lab">指示色</span>
+  <span class="seg" id="ind">
+    <button data-v="gr" class="on">开绿 · 关红</button>
+    <button data-v="g">只在开时露绿</button>
+    <button data-v="r">开红（老式插线板）</button>
+  </span>
+  <span class="lab">速度</span>
+  <span class="seg" id="slow">
+    <button data-v="1" class="on">正常</button>
+    <button data-v="5">慢放 ×5</button>
+  </span>
+  <button class="btn" id="all">全部切换</button>
+</div>
+
+<div class="grid" id="grid"></div>
+
+<div class="src">
+  <p>参考来源（看过做法，代码是这里重写的）：
+  <a href="https://dev.to/ykadosh/how-i-made-this-realistic-red-switch-pure-css-49g2">Realistic Red Switch 拆解（透视 700px、25° 转角、先慢后快的「咔哒」曲线）</a> ·
+  <a href="https://codemyui.com/checkbox-designed-as-rocker-switch-in-pure-css/">Rocker Switch in Pure CSS</a> ·
+  <a href="https://freefrontend.com/css-toggle-switches/page/2/">Vertical Rocker Switch（多层阴影做厚度）</a> ·
+  <a href="https://www.stylepark.com/en/news/50-anniversary-jung-ls-990">Jung LS 990（1968，包豪斯式方形跷板）</a> ·
+  <a href="https://dribbble.com/kevinandersson/collections/13580-Dieter-Rams">Dieter Rams / Braun 界面合集</a> ·
+  <a href="https://www.framer.com/marketplace/components/3d-lever-switch/">3D Lever Switch</a> ·
+  <a href="https://playbooks.com/skills/dylantarre/animation-principles/micro-interactions">开关动效时长 150–300ms、回弹曲线 (.34,1.56,.64,1)</a></p>
+</div>
+
+<script>
+const V = [
+  ['a','象牙家用','老式墙壁开关：象牙白塑料，14° 倾角，翘起的一端露出侧壁颜色。'],
+  ['b','胶木','早年胶木开关的深棕亮面，倾角大一点，顶边带一道高光。'],
+  ['c','Jung LS 990','1968 年包豪斯式设计：方角、薄边框、平而大的跷板，只倾 8°。'],
+  ['d','Braun 灰','拉姆斯配色：浅灰机身配深灰跷板，颜色只留给状态。'],
+  ['e','黑色 I/O','设备电源那种黑色船型开关，印着 I 和 O。'],
+  ['f','深色融入','和本地 AI 一样的深色，不抢眼，只靠倾斜和那一条颜色。'],
+  ['g','拉丝铝','金属面板质感，细横纹和顶边高光。'],
+  ['h','回弹','同 F，落到位后会微微过冲再回来，300ms。'],
+  ['i','咔哒','同 F，开头有一点阻力，后面一下按到底，240ms。'],
+  ['j','发光指示','同 F，开的时候侧壁发光，旁边再亮一颗小灯。'],
+  ['k','侧视剖面','从侧面看跷板：一根横杆压在支点上左右翻。'],
+  ['l','线框','平面画法：只有一圈细线，压下去的那一半变亮，翘起的一端出一条颜色。'],
+];
+const inner = () => `<span class="fr"><span class="hole"><span class="rc"><i class="wl"></i><i class="wr"></i><i class="fc"></i><i class="fc2"></i><span class="mk i">I</span><span class="mk o">O</span></span></span><span class="pf"><span class="base"></span><span class="piv"></span><span class="bar2"><i class="pl"></i><i class="pr"></i></span></span><span class="ln"><i></i><b class="bl"></b><b class="br"></b></span><span class="led"></span></span>`;
+const sw = (v, on, label) => `<button type="button" class="rk v-${v}" aria-pressed="${on}" aria-label="${label}">${inner()}</button>`;
+document.getElementById('grid').innerHTML = V.map(([v, n, d], i) => `<div class="card"><h2><b>${v.toUpperCase()}</b>${n}</h2><p>${d}</p><div class="stage">${sw(v, i % 2 === 0, n)}</div><div class="pop"><div class="row"><span>联网</span>${sw(v, true, '联网')}</div><div class="row"><span>思考</span>${sw(v, false, '思考')}</div></div><div class="cap">实际大小</div></div>`).join('');
+document.addEventListener('click', (e) => {
+  const r = e.target.closest('.rk'); if (r) { r.setAttribute('aria-pressed', r.getAttribute('aria-pressed') !== 'true'); return; }
+  const b = e.target.closest('.seg button'); if (b) {
+    b.parentNode.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
+    if (b.parentNode.id === 'ind') document.body.dataset.ind = b.dataset.v;
+    else document.documentElement.style.setProperty('--slow', b.dataset.v);
+  }
+  if (e.target.id === 'all') document.querySelectorAll('.stage .rk').forEach((x) => x.setAttribute('aria-pressed', x.getAttribute('aria-pressed') !== 'true'));
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,52 @@
+<!doctype html><meta charset="utf-8"><title>共生体融合预览</title>
+<style>
+body{background:#17171a;color:#9a9aa2;font:14px "Microsoft YaHei",sans-serif;margin:0;padding:36px;display:flex;gap:60px;flex-wrap:wrap}
+.c{width:260px}.c h3{color:#e2e2e5;font-weight:500;margin:0 0 4px;font-size:15px}.c p{margin:0 0 12px;font-size:12px;line-height:1.5;height:54px}
+.big{width:260px;height:260px}.sm{display:flex;align-items:center;gap:8px;margin-top:10px}.sm i{width:22px;height:22px;display:block}
+svg{width:100%;height:100%;display:block;overflow:visible}
+</style>
+<svg width="0" height="0" style="position:absolute"><defs>
+<!-- 粘稠滤镜：先模糊，再把透明度拉到“要么有、要么没有”，靠得近的球边缘就会糊在一起、拉出丝 -->
+<filter id="goo" x="-30%" y="-30%" width="160%" height="160%" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="1.15"/><feColorMatrix values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 19 -8"/></filter>
+</defs></svg>
+<div id="g" style="display:contents"></div>
+<script>
+const TP=Math.PI*2,sph=[];
+for(let k=0;k<8;k++){const y=1-2*(k+.5)/8,r=Math.sqrt(1-y*y),a=k*2.399963;sph.push([r*Math.cos(a),y,r*Math.sin(a)])}
+const lat=t=>sph.map((_,k)=>[(k&1?.58:-.58)+.07*Math.sin(t*9+k*1.7),(k&2?.58:-.58)+.07*Math.sin(t*8+k*2.3),(k&4?.58:-.58)+.07*Math.sin(t*10+k*.9)]);
+const knot=t=>sph.map((_,k)=>{const u=k*Math.PI/4+t*.6;return[(Math.sin(u)+2*Math.sin(2*u))/3.1,(Math.cos(u)-2*Math.cos(2*u))/3.1,-Math.sin(3*u)/1.6]});
+const shapes=[()=>sph,lat,knot],ease=u=>u*u*(3-2*u),cl=(u,a=0,b=1)=>Math.min(b,Math.max(a,u));
+/* 变形的过程：形状 A 的球先收拢、粘成一团、在团里翻滚，再从团里被“拉”出来，变成形状 B */
+const cache={};
+function grp(S){const n=S.length,used=new Array(n).fill(false),pairs=[];const d=(a,b)=>Math.hypot(a[0]-b[0],a[1]-b[1],a[2]-b[2]);
+ for(let i=0;i<n;i++){if(used[i])continue;let bj=-1,bd=1e9;for(let j=i+1;j<n;j++)if(!used[j]&&d(S[i],S[j])<bd){bd=d(S[i],S[j]);bj=j}used[i]=used[bj]=true;pairs.push([i,bj])}
+ const cen=p=>[0,1,2].map(k=>(S[p[0]][k]+S[p[1]][k])/2),qu=new Array(pairs.length).fill(false),quads=[];
+ for(let i=0;i<pairs.length;i++){if(qu[i])continue;let bj=-1,bd=1e9;for(let j=i+1;j<pairs.length;j++)if(!qu[j]&&d(cen(pairs[i]),cen(pairs[j]))<bd){bd=d(cen(pairs[i]),cen(pairs[j]));bj=j}qu[i]=qu[bj]=true;quads.push([...pairs[i],...pairs[bj]])}
+ const g1=[],g2=[];pairs.forEach((p,k)=>p.forEach(i=>g1[i]=p));quads.forEach(q=>q.forEach(i=>g2[i]=q));return{g1,g2}}
+const mean=(S,ids)=>[0,1,2].map(k=>ids.reduce((a,i)=>a+S[i][k],0)/ids.length);
+/* 三级融合：8 颗两两粘成 4 团 → 4 团两两粘成 2 团 → 2 团粘成 1 团；分裂就是倒着来，按新形状里谁和谁靠得近来分 */
+function levels(S,G){const all=[...Array(S.length).keys()];return S.map((p,i)=>[p,mean(S,G.g1[i]),mean(S,G.g2[i]),mean(S,all)])}
+const lerp3=(a,b,f)=>[a[0]+(b[0]-a[0])*f,a[1]+(b[1]-a[1])*f,a[2]+(b[2]-a[2])*f],SC=[1,1.18,1.5,2.0];
+function stage(L,u,i){const s=cl(u-i*.012,0,1)*3,seg=Math.min(2,Math.floor(s)),f=ease(s-seg);return{p:lerp3(L[seg],L[seg+1],f),k:SC[seg]+(SC[seg+1]-SC[seg])*f}}
+const V={
+ string:{n:'B　一颗拉一颗，拉出丝',d:'球一颗接一颗被拉向新位置，前一颗没走远，后一颗已经出发，中间会拉出一条黏丝再断开。',
+  hold:.3,dur:3.4,f:(S0,S1,ph,t)=>{const p=ph%1;
+   return S0.map((a,i)=>{const b=S1[i],d=i*.055,m=ease(cl((p-.3-d)/.42));const bulge=Math.sin(Math.PI*m)*.32;
+    return{p:[a[0]+(b[0]-a[0])*m+bulge*Math.cos(t*5+i),a[1]+(b[1]-a[1])*m+bulge*Math.sin(t*4+i*1.3),a[2]+(b[2]-a[2])*m],k:1}})}}
+};
+V.fuse={n:'C　八颗彼此融合',d:'八颗先两两粘成四团，四团再两两粘成两团，最后粘成一整团，在团里蠕动；再倒过来一层层分裂，长成下一个形状。球之间是互相融合，不是各自飞向目标。',dur:4.6,f:(S0,S1,ph,t,r)=>{const p=ph%1,idx=Math.floor(ph);
+ if(!cache[idx]){cache[idx]={a:grp(S0),b:grp(S1)}}
+ const C=cache[idx];let u,L,rev=false;
+ if(p<.14){return S0.map((q)=>({p:q,k:1}))}
+ if(p<.5){u=ease((p-.14)/.36);L=levels(S0,C.a);return L.map((l,i)=>stage(l,u,i))}
+ if(p<.58){const w=(p-.5)/.08,L2=levels(S0,C.a);return L2.map((l,i)=>({p:[l[3][0]+.16*Math.sin(t*9+i*1.1)*Math.sin(Math.PI*w),l[3][1]+.16*Math.sin(t*8+i*1.7)*Math.sin(Math.PI*w),l[3][2]+.16*Math.sin(t*10+i*.6)*Math.sin(Math.PI*w)],k:SC[3]}))}
+ if(p<.92){u=1-ease((p-.58)/.34);L=levels(S1,C.b);return L.map((l,i)=>stage(l,u,i))}
+ return S1.map(q=>({p:q,k:1}))}};
+const els=[],g=document.getElementById('g');
+Object.entries(V).forEach(([key,v])=>{const c=document.createElement('div');c.className='c';c.innerHTML='<h3>'+v.n+'</h3><p>'+v.d+'</p><div class="big"></div><div class="sm"><i></i><span>正在思考</span></div>';g.appendChild(c);
+ [c.querySelector('.big'),c.querySelector('.sm i')].forEach(b=>{b.innerHTML='<svg viewBox="0 0 24 24"><g filter="url(#goo)">'+'<circle r="1.7" fill="#e5484d"/>'.repeat(8)+'</g></svg>';els.push([b,v])})});
+const t0=performance.now(),FZ=new URLSearchParams(location.search).get('t');
+(function f(now){requestAnimationFrame(f);const t=FZ!==null?+FZ:(now-t0)/1000,A=t*1.5,B=.5,cA=Math.cos(A),sA=Math.sin(A),cB=Math.cos(B),sB=Math.sin(B);
+ els.forEach(([b,v])=>{const ph=t/v.dur,si=Math.floor(ph)%3,S0=shapes[si](t),S1=shapes[(si+1)%3](t),P=v.f(S0,S1,ph,t),cs=b.querySelectorAll('circle');
+  P.forEach(({p:[x,y,z],k},i)=>{const x1=x*cA+z*sA,z1=-x*sA+z*cA,y1=y*cB-z1*sB,z2=y*sB+z1*cB,c=cs[i];c.setAttribute('cx',12+x1*8.8);c.setAttribute('cy',12+y1*8.8);c.setAttribute('r',((1.7+.6*z2)*k).toFixed(2))})})})(performance.now());
+</script>

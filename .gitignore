@@ -1,0 +1,11 @@
+﻿*.gguf
+*.bin
+*.safetensors
+*.pt
+models/
+.env
+venv/
+__pycache__/
+node_modules/
+Ollama/
+安装包/

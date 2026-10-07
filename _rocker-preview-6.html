@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>开关加急停 · 一体</title>
+<style>
+:root{
+  --bg:#212121; --side:#282828; --pill:#2c2c2c; --line:rgba(255,255,255,.08);
+  --ink:#fff; --ink2:#e2e2e5; --mute:#97979e;
+  --ok:#8bd5a8; --red:#c8372d; --warn:#ff7b72;
+  --font:"Inter","PingFang SC","Microsoft YaHei",sans-serif;
+  --slow:1;
+}
+body{margin:0;background:var(--bg);color:var(--ink2);font:14px/1.5 var(--font);padding:24px 16px 60px}
+h1{font-size:22px;color:var(--ink);margin:0 0 4px;font-weight:600}
+.sub{color:var(--mute);margin:0 0 18px;font-size:13px;max-width:900px}
+.bar{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;margin-bottom:22px;position:sticky;top:0;background:var(--bg);padding:10px 0;z-index:5;border-bottom:1px solid var(--line)}
+.seg{display:inline-flex;background:var(--pill);border-radius:8px;padding:2px}
+.seg button{border:0;background:none;color:var(--mute);font:inherit;font-size:13px;padding:5px 10px;border-radius:6px;cursor:pointer}
+.seg button.on{background:rgba(255,255,255,.12);color:var(--ink)}
+.lab{color:var(--mute);font-size:13px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:14px}
+.card{background:var(--side);border-radius:12px;padding:16px 16px 14px;display:flex;flex-direction:column}
+.card.ref{outline:1px dashed rgba(255,255,255,.18)}
+.card h2{margin:0;font-size:15px;color:var(--ink);font-weight:600}
+.card h2 b{display:inline-block;width:30px;color:var(--mute);font-weight:600}
+.card p{margin:4px 0 0 30px;color:var(--mute);font-size:12.5px;min-height:56px}
+.stage{height:150px;display:flex;align-items:center;justify-content:center}
+.stage .pn{--u:3px}
+.cap{color:var(--mute);font-size:12px;text-align:center;margin-top:6px}
+
+/* ---- 仿本地 AI 顶栏（实际大小） ---- */
+.hd{height:48px;display:flex;align-items:center;gap:8px;padding:0 16px;background:#303030;border-radius:8px;margin-top:6px}
+.hd .t{font-size:13.5px;font-weight:500;color:var(--ink);margin-right:8px;white-space:nowrap}
+.hd .g{flex:1}
+.hd .ic{width:34px;height:34px;border-radius:8px;border:0;background:transparent;color:var(--mute);cursor:pointer;display:grid;place-items:center;padding:0}
+.hd .ic:hover{background:#2f2f2f;color:var(--ink)}
+.hd .pn{position:relative;top:1.2px;left:8px}
+.tip{color:var(--mute);font-size:12px;margin:6px 2px 0;min-height:18px}
+.tip b{font-weight:500;color:var(--ink2)}
+
+/* ================= 一块面板：左跷板（同 A）+ 右急停键 =================
+   --u：1px = 顶栏实际大小。高 24.8 = 125% 下 31 设备像素，和现在的 STOP 同高 */
+.pn{--u:1px;--dur:170ms;--ease:cubic-bezier(.4,0,.2,1);--on:var(--ok);--off:var(--warn);
+  position:relative;display:inline-flex;align-items:stretch;gap:calc(2.4*var(--u));box-sizing:border-box;height:calc(24.8*var(--u));padding:calc(2.4*var(--u));
+  border-radius:calc(7.2*var(--u));background:#242424;box-shadow:inset 0 0 0 1px rgba(255,255,255,.10);font-family:var(--font);line-height:0;flex:none}
+body[data-offc=none] .pn{--off:var(--mute)}
+.pn button{font:inherit;border:0;padding:0;margin:0;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.pn button:focus-visible{outline:2px solid #8ab4ff;outline-offset:1px}
+/* 跷板：和 A 一模一样 */
+.pn .rk{width:calc(40*var(--u));display:flex;border-radius:calc(4.8*var(--u));overflow:hidden;background:none}
+.pn .rk[disabled]{cursor:not-allowed;opacity:.38}
+.pn .h{flex:1;display:grid;place-items:center;color:var(--mute);background:#4a4a4a;box-shadow:inset 0 1px 0 rgba(255,255,255,.10);
+  transition:background-color calc(var(--dur)*var(--slow)) var(--ease),box-shadow calc(var(--dur)*var(--slow)) var(--ease),color calc(var(--dur)*var(--slow)) var(--ease)}
+.pn .h.dn{background:#2a2a2a;box-shadow:inset 0 1px 0 rgba(0,0,0,.35)}
+.pn .rk:active .h.dn{background:#262626}
+.pn .h.dn.i{color:var(--on)} .pn .h.dn.o{color:var(--off)}
+.pn.boot .h.dn.i{animation:boot 1s ease-in-out infinite}
+@keyframes boot{50%{opacity:.35}}
+.pn .gI{width:calc(1.6*var(--u));height:calc(8*var(--u));border-radius:calc(.8*var(--u));background:currentColor}
+.pn .gO{width:calc(8*var(--u));height:calc(8*var(--u));border-radius:50%;box-sizing:border-box;border:calc(1.6*var(--u)) solid currentColor}
+/* 急停键 */
+.pn .st{width:calc(46.4*var(--u));border-radius:calc(4.8*var(--u));display:grid;place-items:center;font-size:calc(12*var(--u));letter-spacing:0;color:#fff;background:var(--red);line-height:1;
+  transition:background-color calc(var(--dur)*var(--slow)) var(--ease),color calc(var(--dur)*var(--slow)) var(--ease)}
+.pn .st:active{background:#b3312a}
+.pn .st.stopping{animation:stopPulse 1s ease-out infinite}
+@keyframes stopPulse{0%{box-shadow:0 0 0 0 rgba(200,55,45,.75)}100%{box-shadow:0 0 0 calc(9*var(--u)) rgba(200,55,45,0)}}
+
+/* G 闲时灰：没有任务在跑时急停键是灰的，有任务才亮红 */
+.G .st.idle{background:#3a3a3a;color:var(--mute);cursor:default}
+/* H 黄底：急停的国际标准是红键黄底（ISO 13850），急停键外面一圈黄 */
+.H .st{box-shadow:0 0 0 calc(1.6*var(--u)) #e8b400}
+.H{gap:calc(4*var(--u))}
+.H .st{width:calc(44.8*var(--u))}
+/* I 竖缝：跷板和急停之间不留缝，只用一条 1px 竖线隔开，整块像一个模块 */
+.I{gap:0}
+.I .rk{border-radius:calc(4.8*var(--u)) 0 0 calc(4.8*var(--u))}
+.I .st{border-radius:0 calc(4.8*var(--u)) calc(4.8*var(--u)) 0;box-shadow:inset 1px 0 0 rgba(0,0,0,.55)}
+</style>
+</head>
+<body data-offc="red">
+<h1>开关加急停 · 一块面板</h1>
+<p class="sub">左边是 A 的跷板，管 AI 上线和下线；右边是急停键，停掉正在跑的任务。两个键装在同一块面板上，但还是两个键：急停不会把 AI 关掉，关 AI 也不按急停。顶栏里齿轮、AI 状态、STOP 三样东西，变成齿轮加这一块。</p>
+
+<div class="bar">
+  <span class="lab">关的时候</span>
+  <span class="seg" id="offc"><button data-v="red" class="on">亮红</button><button data-v="none">不亮</button></span>
+  <span class="lab">模拟</span>
+  <span class="seg" id="busy"><button data-v="0" class="on">空闲</button><button data-v="1">有任务在跑</button></span>
+  <span class="lab">速度</span>
+  <span class="seg" id="slow"><button data-v="1" class="on">正常</button><button data-v="5">慢放 ×5</button></span>
+</div>
+
+<div class="grid" id="grid"></div>
+
+<script>
+const V = [
+  ['F', '并排', '面板里左边跷板、右边红色急停，中间留一道缝。急停一直是红的，和现在的 STOP 一样。'],
+  ['G', '闲时灰', '同 F，但没有任务在跑时急停键是灰的；一开始干活才亮红。整块面板平时只有开关那一个绿点。'],
+  ['H', '黄底急停', '急停的国际标准是红键黄底（ISO 13850）：红键外面一圈黄。最像真设备，但黄色在这个界面里很跳。'],
+  ['I', '一体模块', '跷板和急停之间不留缝，只用一条细线隔开，整块像设备面板上的一个模块。'],
+];
+const GEAR = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></svg>';
+const pn = (v) => `<span class="pn ${v}"><button type="button" class="rk" aria-label="AI 电源"><span class="h o"><i class="gO"></i></span><span class="h i"><i class="gI"></i></span></button><button type="button" class="st">STOP</button></span>`;
+document.getElementById('grid').innerHTML = V.map(([v, n, d]) => `<div class="card" data-v="${v}"><h2><b>${v}</b>${n}</h2><p>${d}</p><div class="stage">${pn(v)}</div><div class="hd"><span class="t">对话</span><span class="g"></span><button class="ic" title="设置">${GEAR}</button>${pn(v)}</div><div class="tip"></div><div class="cap">↑ 顶栏实际大小</div></div>`).join('');
+
+const st = {}, stopping = {}; let busy = false; const timers = {};
+function paint(card) {
+  const v = card.dataset.v, s = st[v] || 'off', on = s !== 'off';
+  card.querySelectorAll('.pn').forEach((p) => {
+    p.classList.toggle('boot', s === 'boot');
+    p.querySelectorAll('.h').forEach((h) => h.classList.toggle('dn', h.classList.contains('i') === on));
+    const k = p.querySelector('.rk'); k.setAttribute('aria-pressed', on);
+    k.title = s === 'boot' ? 'AI 上线中…' : on ? 'AI 已上线：点一下下线' : 'AI 已下线：点一下上线';
+    const b = p.querySelector('.st'); b.classList.toggle('idle', !busy); b.classList.toggle('stopping', !!stopping[v]);
+    b.title = busy ? '急停：停掉正在跑的任务（Esc）' : '没有任务在跑';
+  });
+  card.querySelector('.tip').innerHTML = stopping[v] ? '急停：<b>正在停止…</b>' : '开关：<b>' + (s === 'boot' ? 'AI 上线中…' : on ? 'AI 已上线' : 'AI 已下线') + '</b> · 急停：<b>' + (busy ? '可按' : '没有任务') + '</b>';
+}
+const paintAll = () => document.querySelectorAll('.card').forEach(paint);
+paintAll();
+document.addEventListener('click', (e) => {
+  const card = e.target.closest('.card');
+  if (e.target.closest('.rk') && card) {
+    const v = card.dataset.v; clearTimeout(timers[v]);
+    if ((st[v] || 'off') === 'off') { st[v] = 'boot'; timers[v] = setTimeout(() => { st[v] = 'on'; paint(card); }, 3000); } else st[v] = 'off';
+    paint(card); return;
+  }
+  if (e.target.closest('.st') && card) {
+    const v = card.dataset.v; if (!busy) return;
+    stopping[v] = true; paint(card); setTimeout(() => { stopping[v] = false; paint(card); }, 1500); return;
+  }
+  const b = e.target.closest('.seg button'); if (!b) return;
+  b.parentNode.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
+  const id = b.parentNode.id, val = b.dataset.v;
+  if (id === 'slow') document.documentElement.style.setProperty('--slow', val);
+  else if (id === 'busy') busy = val === '1';
+  else document.body.dataset[id] = val;
+  paintAll();
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,72 @@
+# 「不是游戏」排除名单。这里的程序，就算显卡占用很高，AI 也不会因为它们自动下线。
+# 助手判断游戏是看「实际用显卡的情况」，不看文件名，所以这个名单只用来排除。
+# 误判了怎么办：AI 自动下线时的提示里点「这不是游戏」，会自动把程序记到这个文件的最后，并让 AI 立刻上线。
+# 也可以自己改：保存后 30 秒内自动生效，不用重启。
+#
+# 写法（每行一条，# 开头是注释）：
+#   某某.exe         按程序文件名（不分大小写）
+#   path:路径片段     程序所在路径里包含这段文字就排除（不分大小写）
+
+# ---- 浏览器 ----
+msedge.exe
+msedgewebview2.exe
+chrome.exe
+firefox.exe
+brave.exe
+opera.exe
+iexplore.exe
+
+# ---- Claude 桌面版 / 开发工具 ----
+claude.exe
+electron.exe
+code.exe
+
+# ---- 看视频 / 剪辑 / 录屏 ----
+vlc.exe
+potplayermini64.exe
+potplayer64.exe
+obs64.exe
+obs32.exe
+capcut.exe
+jianyingpro.exe
+premiere pro.exe
+afterfx.exe
+davinciresolve.exe
+resolve.exe
+
+# ---- 办公 / 聊天 / 音乐 ----
+wps.exe
+wpsoffice.exe
+et.exe
+wpp.exe
+winword.exe
+excel.exe
+powerpnt.exe
+wechat.exe
+weixin.exe
+qq.exe
+dingtalk.exe
+lark.exe
+feishu.exe
+telegram.exe
+whatsapp.exe
+spotify.exe
+cloudmusic.exe
+
+# ---- 壁纸引擎、显卡驱动软件、平台客户端本身 ----
+wallpaper32.exe
+wallpaper64.exe
+wallpaperservice32.exe
+radeonsoftware.exe
+cnext.exe
+amdrsserv.exe
+amddvr.exe
+msiafterburner.exe
+rtss.exe
+steam.exe
+steamwebhelper.exe
+epicgameslauncher.exe
+epicwebhelper.exe
+battle.net.exe
+wegame.exe
+path:\yxlm\wegame\

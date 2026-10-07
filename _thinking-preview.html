@@ -1,0 +1,42 @@
+<!doctype html><meta charset="utf-8"><title>思考动画预览</title>
+<style>
+body{background:#17171a;color:#9a9aa2;font:14px "Microsoft YaHei",sans-serif;margin:0;padding:40px;display:flex;gap:60px;flex-wrap:wrap}
+.c{width:260px}.c h3{color:#e2e2e5;font-weight:500;margin:0 0 6px}.c p{margin:0 0 20px;line-height:1.6}
+.row{display:flex;align-items:center;gap:10px;margin-bottom:26px}
+.row i{display:block;flex:none}
+.big i{width:96px;height:96px}.mid i{width:28px;height:28px}.sm i{width:18px;height:18px}
+.row span{background:linear-gradient(90deg,#9a9aa2 35%,#fff 50%,#9a9aa2 65%) 0 0/250% 100%;-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;animation:shine 2.2s linear infinite}
+@keyframes shine{from{background-position:100% 0}to{background-position:-100% 0}}
+svg{width:100%;height:100%;display:block;overflow:visible}
+.ln{fill:none;stroke:#e2e2e5;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.fl{fill:#e2e2e5}
+</style>
+
+<div class="c" id="cc"><h3>参考　你看到的那种（按描述画）</h3><p>几个小球分布在一个球面上，整体在三维里不停换着角度转，近的大亮、远的小暗。我没见过原样，是照你的描述画的。</p>
+<div class="row big"><i class="d"></i></div><div class="row mid"><i class="d"></i><span>正在思考</span></div><div class="row sm"><i class="d"></i><span>正在思考</span></div></div>
+<script>(()=>{
+const n=8,P=[];for(let k=0;k<n;k++){const y=1-2*(k+.5)/n,r=Math.sqrt(1-y*y),a=k*2.399963;P.push([r*Math.cos(a),y,r*Math.sin(a)])}
+const els=[...document.querySelectorAll('.d')];
+els.forEach(e=>{e.innerHTML='<svg viewBox="0 0 24 24">'+P.map(()=>'<circle class="fl" r="1.5"/>').join('')+'</svg>'});
+const t0=performance.now();
+function f(now){const t=(now-t0)/1000,A=t*1.15,B=t*.7+Math.sin(t*.9),C=t*.45;
+ const cA=Math.cos(A),sA=Math.sin(A),cB=Math.cos(B),sB=Math.sin(B),cC=Math.cos(C),sC=Math.sin(C);
+ const pts=P.map(p=>{let [x,y,z]=p;let x1=x*cA+z*sA,z1=-x*sA+z*cA;let y1=y*cB-z1*sB,z2=y*sB+z1*cB;let x2=x1*cC-y1*sC,y2=x1*sC+y1*cC;return [x2,y2,z2]});
+ els.forEach(e=>{[...e.querySelectorAll('circle')].forEach((c,i)=>{const [x,y,z]=pts[i];c.setAttribute('cx',12+x*8.5);c.setAttribute('cy',12+y*8.5);c.setAttribute('r',(1.45+.55*z).toFixed(2));c.setAttribute('opacity',(.6+.4*z).toFixed(2))})});
+ requestAnimationFrame(f)}
+requestAnimationFrame(f)})()</script>
+<div class="c"><h3>天线球版</h3><p>两条交叉的天线，四个端点各是一个小球，中间一个小球当轴心。整体用同样的方式在三维里不停换角度转。</p>
+<div class="row big"><i class="a"></i></div><div class="row mid"><i class="a"></i><span>正在思考</span></div><div class="row sm"><i class="a"></i><span>正在思考</span></div></div>
+<script>(()=>{
+const P=[[1,0,0],[-1,0,0],[0,1,0],[0,-1,0]];
+const els=[...document.querySelectorAll('.a')];
+els.forEach(e=>{e.innerHTML='<svg viewBox="0 0 24 24">'+P.map(()=>'<line class="ln" style="stroke-width:1" x1="12" y1="12"/>').join('')+P.map(()=>'<circle class="fl" r="1.5"/>').join('')+'<circle class="fl" cx="12" cy="12" r="1.3"/></svg>'});
+const t0=performance.now();
+function f(now){const t=(now-t0)/1000,A=t*1.15,B=t*.7+Math.sin(t*.9),C=t*.45;
+ const cA=Math.cos(A),sA=Math.sin(A),cB=Math.cos(B),sB=Math.sin(B),cC=Math.cos(C),sC=Math.sin(C);
+ const pts=P.map(p=>{let [x,y,z]=p;let x1=x*cA+z*sA,z1=-x*sA+z*cA;let y1=y*cB-z1*sB,z2=y*sB+z1*cB;let x2=x1*cC-y1*sC,y2=x1*sC+y1*cC;return [x2,y2,z2]});
+ els.forEach(e=>{const L=e.querySelectorAll('line'),C2=e.querySelectorAll('circle');
+  pts.forEach(([x,y,z],i)=>{const X=12+x*8.5,Y=12+y*8.5;L[i].setAttribute('x2',X);L[i].setAttribute('y2',Y);L[i].setAttribute('opacity',(.3+.3*z).toFixed(2));
+   C2[i].setAttribute('cx',X);C2[i].setAttribute('cy',Y);C2[i].setAttribute('r',(1.45+.55*z).toFixed(2));C2[i].setAttribute('opacity',(.6+.4*z).toFixed(2))})});
+ requestAnimationFrame(f)}
+requestAnimationFrame(f)})()</script>

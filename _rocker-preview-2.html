@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>老式跷板开关</title>
+<style>
+:root{
+  --bg:#212121; --side:#282828; --pill:#2c2c2c; --line:rgba(255,255,255,.08);
+  --ink:#fff; --ink2:#e2e2e5; --mute:#97979e;
+  --font:"Inter","PingFang SC","Microsoft YaHei",sans-serif;
+  --slow:1;
+  --noise:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 .10 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+body{margin:0;background:var(--bg);color:var(--ink2);font:14px/1.5 var(--font);padding:24px 16px 60px}
+h1{font-size:22px;color:var(--ink);margin:0 0 4px;font-weight:600}
+.sub{color:var(--mute);margin:0 0 18px;font-size:13px;max-width:900px}
+.bar{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;margin-bottom:22px;position:sticky;top:0;background:var(--bg);padding:10px 0;z-index:5;border-bottom:1px solid var(--line)}
+.seg{display:inline-flex;background:var(--pill);border-radius:8px;padding:2px}
+.seg button{border:0;background:none;color:var(--mute);font:inherit;font-size:13px;padding:5px 10px;border-radius:6px;cursor:pointer}
+.seg button.on{background:rgba(255,255,255,.12);color:var(--ink)}
+.lab{color:var(--mute);font-size:13px}
+.btn{border:0;background:rgba(255,255,255,.07);color:var(--ink2);font:inherit;font-size:13px;height:30px;padding:0 12px;border-radius:8px;cursor:pointer}
+.btn:hover{background:rgba(255,255,255,.12);color:var(--ink)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:14px}
+.card{background:var(--side);border-radius:12px;padding:16px;display:flex;flex-direction:column}
+.card h2{margin:0;font-size:15px;color:var(--ink);font-weight:600}
+.card h2 b{display:inline-block;width:28px;color:var(--mute);font-weight:600}
+.card p{margin:4px 0 0 28px;color:var(--mute);font-size:12.5px;min-height:38px}
+.stage{height:230px;display:flex;align-items:center;justify-content:center;border-radius:10px;margin:10px 0 12px;
+  background:radial-gradient(120% 90% at 30% 20%,#d9d4c8,#a9a396);}
+.stage .rk{--fs:26px}
+.pop{background:#2f2f2f;border-radius:10px;padding:6px;display:flex;flex-direction:column;gap:4px;width:200px;align-self:center}
+.row{display:flex;align-items:center;justify-content:space-between;height:34px;padding:0 9px 0 12px;border-radius:8px;background:rgba(255,255,255,.07);color:var(--ink2);font-size:13px}
+.row .rk{--fs:9px}
+.cap{color:var(--mute);font-size:12px;text-align:center;margin-top:6px}
+
+/* ===== 结构 ===== */
+.rk{
+  --on-c:#2f9e5b; --off-c:#c93a32; --neu:#bbb;
+  --W:4.4em; --H:1.5em; --ang:12deg; --v:5deg; --dep:.7em;
+  --dur:150ms; --ease:cubic-bezier(.75,0,.2,1.18);
+  --plate:#e9e0c8; --pw:7.6em; --ph:4.4em; --pr:.35em;
+  --body:#efe6cf; --side:#cfc4a8; --hole:#5c5548;
+  --pz:0em;
+  font-size:var(--fs);background:none;border:0;padding:0;margin:0;cursor:pointer;display:inline-block;line-height:0;-webkit-tap-highlight-color:transparent
+}
+.rk:focus-visible{outline:2px solid #8ab4ff;outline-offset:.2em}
+.rk:active{--pz:-.09em}
+body[data-ind=g] .rk{--off-c:var(--neu)}
+body[data-ind=r] .rk{--on-c:#c93a32;--off-c:var(--neu)}
+
+.pl{position:relative;display:block;width:var(--pw);height:var(--ph);border-radius:var(--pr);
+  background:var(--noise),var(--plate-bg,linear-gradient(170deg,color-mix(in srgb,var(--plate) 100%,#fff 18%),var(--plate) 45%,color-mix(in srgb,var(--plate),#000 10%)));
+  box-shadow:0 .12em .3em rgba(0,0,0,.45),0 .02em .04em rgba(0,0,0,.35),inset 0 .05em .02em rgba(255,255,255,.55),inset 0 -.06em .05em rgba(0,0,0,.16)}
+/* 盖板中间那圈凸起的「框」，跷板从里面出来 */
+.bz{position:absolute;left:50%;top:50%;width:calc(var(--W) + .62em);height:calc(var(--H) + .62em);transform:translate(-50%,-50%);border-radius:.3em;
+  background:linear-gradient(180deg,rgba(255,255,255,.35),rgba(0,0,0,.08));box-shadow:0 .04em .08em rgba(0,0,0,.25),inset 0 .03em .01em rgba(255,255,255,.5)}
+.hole{position:absolute;left:50%;top:50%;width:calc(var(--W) + .22em);height:calc(var(--H) + .22em);transform:translate(-50%,-50%);border-radius:.16em;
+  background:var(--hole);perspective:14em;box-shadow:inset 0 .08em .14em rgba(0,0,0,.75)}
+.rc{position:absolute;left:.11em;top:.11em;width:var(--W);height:var(--H);transform-style:preserve-3d;
+  transform:translateZ(var(--pz)) rotateY(var(--ang));transition:transform calc(var(--dur) * var(--slow)) var(--ease)}
+.rk[aria-pressed=true] .rc{transform:translateZ(var(--pz)) rotateY(calc(var(--ang) * -1))}
+/* 两个面：中间微凹成浅 V 形 */
+.fa,.fb{position:absolute;top:0;height:100%;width:50%;transform-style:preserve-3d;
+  background:var(--noise),var(--rk-face,linear-gradient(180deg,color-mix(in srgb,var(--body),#fff 22%),var(--body) 40%,color-mix(in srgb,var(--body),#000 7%)))}
+.fa{left:0;transform-origin:100% 50%;transform:rotateY(var(--v));border-radius:.12em 0 0 .12em}
+.fb{right:0;transform-origin:0 50%;transform:rotateY(calc(var(--v) * -1));border-radius:0 .12em .12em 0}
+.fa::after,.fb::after{content:"";position:absolute;inset:0;border-radius:inherit;transform:translateZ(.004em);transition:background-color calc(var(--dur) * var(--slow)) var(--ease);pointer-events:none}
+.fa::before,.fb::before{content:"";position:absolute;inset:0;border-radius:inherit;transform:translateZ(.003em);pointer-events:none}
+.fa::before{background:linear-gradient(90deg,rgba(255,255,255,.18) 0 .05em,transparent .2em,transparent 70%,rgba(0,0,0,.07))}
+.fb::before{background:linear-gradient(270deg,rgba(255,255,255,.18) 0 .05em,transparent .2em,transparent 70%,rgba(0,0,0,.07))}
+/* 光从左上：关（左端翘）左面背光；开（右端翘）右面迎光 */
+.fa::after{background-color:rgba(0,0,0,.13)} .fb::after{background-color:rgba(0,0,0,.06)}
+.rk[aria-pressed=true] .fa::after{background-color:rgba(0,0,0,0)} .rk[aria-pressed=true] .fb::after{background-color:rgba(255,255,255,.07)}
+/* 两端侧壁：上半截刷了颜色 */
+.wl,.wr{position:absolute;top:.03em;bottom:.03em;width:var(--dep)}
+.wr{right:0;transform-origin:100% 50%;transform:rotateY(-110deg);background:linear-gradient(270deg,var(--on-c) 0 62%,var(--side) 62%)}
+.wl{left:0;transform-origin:0 50%;transform:rotateY(110deg);background:linear-gradient(90deg,var(--off-c) 0 62%,var(--side) 62%)}
+/* 压下去的一端沉到框下面，侧壁看不见 */
+.wl,.wr{transition:opacity calc(var(--dur) * var(--slow) * .6) linear}
+.wr{opacity:0}.rk[aria-pressed=true] .wr{opacity:1}.rk[aria-pressed=true] .wl{opacity:0}
+/* 螺丝 */
+.scr{position:absolute;top:50%;width:.56em;height:.56em;margin-top:-.28em;border-radius:50%;
+  background:radial-gradient(circle at 38% 32%,#fbfbfb,#b9b9b9 55%,#7c7c7c);box-shadow:inset 0 0 0 .035em rgba(0,0,0,.35),0 .03em .01em rgba(255,255,255,.6),0 -.02em .03em rgba(0,0,0,.25)}
+.scr::after{content:"";position:absolute;left:12%;right:12%;top:50%;height:.075em;margin-top:-.0375em;background:#4a4a4a;border-radius:.04em;box-shadow:0 .02em 0 rgba(255,255,255,.5);transform:rotate(var(--r))}
+.scr.s1{left:.55em}.scr.s2{right:.55em}
+.scr.s1{--r:28deg}.scr.s2{--r:-61deg}
+
+/* 实际大小：只留跷板和那圈框 */
+.mini{--pw:calc(var(--W) + .62em);--ph:calc(var(--H) + .62em);--pr:.3em}
+.mini .bz,.mini .scr{display:none}
+
+/* P1 泛黄米白 86 面板 */
+.p1{--plate:#e6dcc2;--body:#ebe1c6;--side:#c7bb9c;--hole:#4e4739;--neu:#cdbf9d}
+/* P2 九十年代白：螺丝帽盖 */
+.p2{--plate:#f1eee5;--body:#f5f2ea;--side:#d2cdc0;--hole:#5b5850;--neu:#d6d1c4}
+.p2 .scr{background:radial-gradient(circle at 40% 30%,#fffdf8,#e6e1d5 60%,#cfc9bb);box-shadow:0 .03em .05em rgba(0,0,0,.3),inset 0 .02em .01em #fff}
+.p2 .scr::after{display:none}
+/* P3 胶木棕面板 + 象牙跷板 + 铜螺丝 */
+.p3{--plate:#4b2d1d;--plate-bg:linear-gradient(170deg,#6a4330,#4b2d1d 45%,#2f1b10);--body:#e8dcbf;--side:#c2b392;--hole:#140b06;--neu:#bfae8a}
+.p3 .bz{background:linear-gradient(180deg,rgba(255,255,255,.18),rgba(0,0,0,.2))}
+.p3 .scr{background:radial-gradient(circle at 38% 32%,#fff1c4,#c9a24e 55%,#7d5c1c)}
+.p3 .scr::after{background:#3b2a0c}
+/* P4 白瓷 + 竖纹防滑跷板 */
+.p4{--plate:#f6f5f1;--body:#f3f2ee;--side:#cfcdc6;--hole:#55534e;--neu:#d0cec7;
+  --rk-face:repeating-linear-gradient(90deg,rgba(0,0,0,.055) 0 .045em,transparent .045em .2em),linear-gradient(180deg,#fff,#f3f2ee 40%,#e3e1db)}
+.p4 .pl{box-shadow:0 .12em .3em rgba(0,0,0,.45),inset 0 .07em .04em rgba(255,255,255,.95),inset 0 -.07em .06em rgba(0,0,0,.14)}
+/* P5 老电器：灰色机身，黑跷板嵌在方孔里 */
+.p5{--plate:#bdb9ae;--body:#262626;--side:#111;--hole:#050505;--neu:#3a3a3a;--pr:.12em;
+  --rk-face:linear-gradient(180deg,#3d3d3d,#1f1f1f 45%,#151515)}
+.p5 .scr{display:none}
+.p5 .bz{border-radius:.08em;background:linear-gradient(180deg,rgba(0,0,0,.18),rgba(255,255,255,.2))}
+.p5 .hole{border-radius:.06em}
+/* P6 插线板上的长条开关 */
+.p6{--W:5.2em;--H:1.35em;--pw:8.6em;--ph:3.2em;--pr:1.6em;--plate:#f4f3ef;--body:#f7f6f2;--side:#cfcdc6;--hole:#4d4b46;--neu:#d0cec7}
+.p6 .scr{display:none}
+.p6 .bz{border-radius:.5em}
+</style>
+</head>
+<body data-ind="gr">
+<h1>老式跷板开关 · 第二轮</h1>
+<p class="sub">按老墙壁开关的样子重做：盖板、一字螺丝、塑料颗粒感、中间微凹的长条跷板，两端侧壁上半截刷了颜色。翻转是「咔」一下到位，带一点碰到限位的回弹。左按＝开，右按＝关。</p>
+
+<div class="bar">
+  <span class="lab">指示色</span>
+  <span class="seg" id="ind">
+    <button data-v="gr" class="on">开绿 · 关红</button>
+    <button data-v="g">只在开时露绿</button>
+    <button data-v="r">开红（插线板）</button>
+  </span>
+  <span class="lab">速度</span>
+  <span class="seg" id="slow"><button data-v="1" class="on">正常</button><button data-v="6">慢放 ×6</button></span>
+  <span class="lab">声音</span>
+  <span class="seg" id="snd"><button data-v="0" class="on">关</button><button data-v="1">咔哒声</button></span>
+  <button class="btn" id="all">全部切换</button>
+</div>
+
+<div class="grid" id="grid"></div>
+
+<script>
+const V = [
+  ['p1','泛黄米白','最常见的老墙壁开关：米白塑料用久了发黄，两颗一字螺丝露在外面，方向各歪各的。'],
+  ['p2','九十年代白','白一点、新一点，螺丝扣上了圆帽盖。'],
+  ['p3','胶木配铜螺丝','更早的胶木深棕盖板，象牙色跷板，黄铜螺丝。'],
+  ['p4','白瓷竖纹','釉面一样亮的白盖板，跷板上一道道竖纹防滑。'],
+  ['p5','老电器面板','收音机、电风扇那种：灰色机身上开个方孔，嵌黑色跷板。'],
+  ['p6','插线板','插线板上那种更长、更扁的开关，两头圆。'],
+];
+const inner = () => `<span class="pl"><i class="scr s1"></i><i class="scr s2"></i><span class="bz"></span><span class="hole"><span class="rc"><span class="fa"><i class="wl"></i></span><span class="fb"><i class="wr"></i></span></span></span></span>`;
+const sw = (v, on, label, mini) => `<button type="button" class="rk ${v}${mini ? ' mini' : ''}" aria-pressed="${on}" aria-label="${label}">${inner()}</button>`;
+document.getElementById('grid').innerHTML = V.map(([v, n, d], i) => `<div class="card"><h2><b>${v.toUpperCase()}</b>${n}</h2><p>${d}</p><div class="stage">${sw(v, i % 2 === 0, n)}</div><div class="pop"><div class="row"><span>联网</span>${sw(v, true, '联网', 1)}</div><div class="row"><span>思考</span>${sw(v, false, '思考', 1)}</div></div><div class="cap">实际大小（只留跷板和外框）</div></div>`).join('');
+
+let ac = null, sound = false;
+function click() {
+  if (!sound) return;
+  ac = ac || new AudioContext();
+  const t = ac.currentTime, sr = ac.sampleRate;
+  [[0, 2600, .5], [.022, 1400, .28]].forEach(([dt, f, g]) => {
+    const n = Math.floor(sr * .012), b = ac.createBuffer(1, n, sr), d = b.getChannelData(0);
+    for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / n, 4);
+    const s = ac.createBufferSource(); s.buffer = b;
+    const bp = ac.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = f; bp.Q.value = 1.6;
+    const gn = ac.createGain(); gn.gain.value = g;
+    s.connect(bp).connect(gn).connect(ac.destination); s.start(t + dt);
+  });
+}
+document.addEventListener('click', (e) => {
+  const r = e.target.closest('.rk'); if (r) { r.setAttribute('aria-pressed', r.getAttribute('aria-pressed') !== 'true'); click(); return; }
+  const b = e.target.closest('.seg button'); if (b) {
+    b.parentNode.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
+    const id = b.parentNode.id;
+    if (id === 'ind') document.body.dataset.ind = b.dataset.v;
+    else if (id === 'slow') document.documentElement.style.setProperty('--slow', b.dataset.v);
+    else { sound = b.dataset.v === '1'; click(); }
+  }
+  if (e.target.id === 'all') { document.querySelectorAll('.stage .rk').forEach((x) => x.setAttribute('aria-pressed', x.getAttribute('aria-pressed') !== 'true')); click(); }
+});
+</script>
+</body>
+</html>

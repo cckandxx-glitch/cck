@@ -1,0 +1,76 @@
+<!doctype html><meta charset="utf-8"><title>思考动画挑选</title>
+<style>
+body{background:#17171a;color:#9a9aa2;font:14px "Microsoft YaHei",sans-serif;margin:0;padding:36px;display:grid;grid-template-columns:repeat(3,220px);gap:40px 50px}
+.c h3{color:#e2e2e5;font-weight:500;margin:0 0 4px;font-size:15px}.c p{margin:0 0 10px;font-size:12px;line-height:1.55;height:56px}
+.big{width:220px;height:220px}.sm{display:flex;align-items:center;gap:8px;margin-top:8px}.sm i{width:22px;height:22px;display:block}
+svg{width:100%;height:100%;display:block;overflow:visible}circle{fill:#e5484d}line{stroke:#e5484d}
+</style>
+<svg width="0" height="0" style="position:absolute"><defs>
+<filter id="goo" x="-30%" y="-30%" width="160%" height="160%" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="1.15"/><feColorMatrix values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 19 -8"/></filter>
+</defs></svg>
+<div id="g" style="display:contents"></div>
+<script>
+const TP=Math.PI*2,ease=u=>u*u*(3-2*u),cl=(u,a=0,b=1)=>Math.min(b,Math.max(a,u));
+/* ---------- 形状（每个都是 8 个点，随时间可动）---------- */
+const sphP=[];for(let k=0;k<8;k++){const y=1-2*(k+.5)/8,r=Math.sqrt(1-y*y),a=k*2.399963;sphP.push([r*Math.cos(a),y,r*Math.sin(a)])}
+const LZ=Array.from({length:8},(_,k)=>[1+k*.7,1+k*.3,20+k*.8]);let lzT=0;
+const lz=(dt)=>LZ.forEach(p=>{const[x,y,z]=p;p[0]+=10*(y-x)*dt;p[1]+=(x*(28-z)-y)*dt;p[2]+=(x*y-8/3*z)*dt});for(let i=0;i<3000;i++)lz(.004);
+const SH={
+ sph:{f:()=>sphP},
+ lat:{f:t=>sphP.map((_,k)=>[(k&1?.58:-.58)+.07*Math.sin(t*9+k*1.7),(k&2?.58:-.58)+.07*Math.sin(t*8+k*2.3),(k&4?.58:-.58)+.07*Math.sin(t*10+k*.9)])},
+ knot:{f:t=>sphP.map((_,k)=>{const u=k*Math.PI/4+t*.6;return[(Math.sin(u)+2*Math.sin(2*u))/3.1,(Math.cos(u)-2*Math.cos(2*u))/3.1,-Math.sin(3*u)/1.6]})},
+ dna:{f:t=>{const o=[];for(let k=0;k<4;k++)for(const s of[0,Math.PI]){const y=((k*.5+t*.18)%2)-1,a=y*3.2+s;o.push([.55*Math.cos(a),y*.95,.55*Math.sin(a)])}return o}},
+ atom:{f:t=>{const o=[[0,0,0]];[[0,3,1.0],[1.05,2,-1.3],[2.1,2,1.7]].forEach(([tl,n,w])=>{for(let j=0;j<n;j++){const p=w*t+j*TP/n,x=.92*Math.cos(p),z=.92*Math.sin(p);o.push([x*Math.cos(tl),x*Math.sin(tl),z])}});return o}},
+ inf:{f:t=>Array.from({length:8},(_,k)=>{const u=k*TP/8+t*.8,d=1+Math.sin(u)**2;return[1.05*Math.cos(u)/d,.22*Math.sin(2*u),1.05*Math.sin(u)*Math.cos(u)/d*1.6]})},
+ spi:{f:()=>Array.from({length:8},(_,k)=>{const a=k*2.399963;return[.4*Math.sqrt(k+.6)*Math.cos(a),-.85+k*.24,.4*Math.sqrt(k+.6)*Math.sin(a)]})},
+ wave:{f:t=>Array.from({length:8},(_,k)=>{const u=k/7;return[-.95+1.9*u,.75*Math.sin(TP*u)*Math.cos(t*3),0]})},
+ lor:{f:()=>LZ.map(p=>[p[0]/20,p[1]/26,(p[2]-25)/20])},
+ cube:{f:()=>sphP.map((_,k)=>[k&1?.58:-.58,k&2?.58:-.58,k&4?.58:-.58])},
+ cross:{f:()=>{const o=[];[-.95,-.35,.35,.95].forEach(v=>o.push([v,0,0]));[-.95,-.35,.35,.95].forEach(v=>o.push([0,0,v]));return o}}
+};
+/* ---------- 融合成一个球 ---------- */
+const dist=(a,b)=>Math.hypot(a[0]-b[0],a[1]-b[1],a[2]-b[2]),mean=(S,ids)=>[0,1,2].map(k=>ids.reduce((s,i)=>s+S[i][k],0)/ids.length),ALL=[0,1,2,3,4,5,6,7],SC=[1,1.18,1.5,2.0];
+function grp(S){const used=[],pairs=[];for(let i=0;i<8;i++){if(used[i])continue;let bj=-1,bd=1e9;for(let j=i+1;j<8;j++)if(!used[j]&&dist(S[i],S[j])<bd){bd=dist(S[i],S[j]);bj=j}used[i]=used[bj]=true;pairs.push([i,bj])}
+ const cen=p=>mean(S,p),qu=[],quads=[];for(let i=0;i<pairs.length;i++){if(qu[i])continue;let bj=-1,bd=1e9;for(let j=i+1;j<pairs.length;j++)if(!qu[j]&&dist(cen(pairs[i]),cen(pairs[j]))<bd){bd=dist(cen(pairs[i]),cen(pairs[j]));bj=j}qu[i]=qu[bj]=true;quads.push([...pairs[i],...pairs[bj]])}
+ const g1=[],g2=[];pairs.forEach(p=>p.forEach(i=>g1[i]=p));quads.forEach(q=>q.forEach(i=>g2[i]=q));return{g1,g2}}
+const levels=(S,G)=>S.map((p,i)=>[p,mean(S,G.g1[i]),mean(S,G.g2[i]),mean(S,ALL)]);
+const lerp3=(a,b,f)=>[a[0]+(b[0]-a[0])*f,a[1]+(b[1]-a[1])*f,a[2]+(b[2]-a[2])*f];
+const stage=(L,u,i)=>{const s=cl(u-i*.012)*3,seg=Math.min(2,Math.floor(s)),f=ease(s-seg);return{p:lerp3(L[seg],L[seg+1],f),k:SC[seg]+(SC[seg+1]-SC[seg])*f}};
+const STY={
+ fuse:{dur:4.6,goo:true,edges:false,f(S0,S1,p,t,st){if(!st.GA){st.GA=grp(S0);st.GB=grp(S1)}
+  if(p<.14)return S0.map(q=>({p:q,k:1}));
+  if(p<.5){const u=ease((p-.14)/.36);return levels(S0,st.GA).map((l,i)=>stage(l,u,i))}
+  if(p<.58){const w=Math.sin(Math.PI*(p-.5)/.08);return levels(S0,st.GA).map((l,i)=>({p:[l[3][0]+.16*Math.sin(t*9+i*1.1)*w,l[3][1]+.16*Math.sin(t*8+i*1.7)*w,l[3][2]+.16*Math.sin(t*10+i*.6)*w],k:SC[3]}))}
+  if(p<.92){const u=1-ease((p-.58)/.34);return levels(S1,st.GB).map((l,i)=>stage(l,u,i))}
+  return S1.map(q=>({p:q,k:1}))}},
+ string:{dur:5.2,goo:true,edges:true,f(S0,S1,p,t){return S0.map((a,i)=>{const u=cl((p-.22-i*.045)/.4),e=1+2.2*Math.pow(u-1,3)+1.2*Math.pow(u-1,2),b=S1[i],sw=Math.sin(Math.PI*u)*.22;
+   return{p:[a[0]+(b[0]-a[0])*e+sw*Math.cos(t*5+i),a[1]+(b[1]-a[1])*e+sw*Math.sin(t*4+i*1.3),a[2]+(b[2]-a[2])*e],k:1}})}},
+ smooth:{dur:3.0,goo:false,edges:false,f(S0,S1,p){const m=ease(cl((p-.4)/.5));return S0.map((a,i)=>({p:lerp3(a,S1[i],m),k:1}))}}
+};
+/* ---------- 方案卡片 ---------- */
+const POOLS={now:['sph','lat','knot'],all:['sph','lat','knot','dna','atom','inf','spi','wave','lor'],life:['dna','atom','knot','inf'],geo:['sph','cube','cross','lat','knot']};
+const CARDS=[
+ ['fuse','now','1　融合成球 · 现在用的','8 个球两两粘成一团再长开。形状：球面、晶格、三叶结轮流。'],
+ ['fuse','all','2　融合成球 · 科学全家','同样的融合，形状扩到 9 种：加上 DNA、原子、无穷、黄金螺旋、驻波、洛伦兹。'],
+ ['fuse','life','3　融合成球 · 生命与物理','只轮流 DNA、原子、三叶结、无穷符号，更像一组“科学符号”。'],
+ ['string','now','4　拉丝 · 现在的形状','球之间有细丝连着，变形时拉长变细断开。形状同现在。'],
+ ['string','all','5　拉丝 · 科学全家','拉丝配 9 种形状。'],
+ ['smooth','now','6　平滑变形 · 早期那种','没有粘稠，球直接平滑变到下一个形状。形状同现在。'],
+ ['smooth','all','7　平滑变形 · 科学全家','平滑变形配 9 种形状。'],
+ ['fuse','geo','8　融合成球 · 几何体','形状：球面、立方体、十字、晶格、三叶结。']
+];
+const inst=[],g=document.getElementById('g');
+CARDS.forEach(([sty,pool,title,desc])=>{const c=document.createElement('div');c.className='c';c.innerHTML='<h3>'+title+'</h3><p>'+desc+'</p><div class="big"></div><div class="sm"><i></i><span>正在思考</span></div>';g.appendChild(c);
+ const st={sty:STY[sty],pool:POOLS[pool],cyc:-1,cur:0,nxt:1,GA:null,GB:null,boxes:[]};
+ [c.querySelector('.big'),c.querySelector('.sm i')].forEach(b=>{b.innerHTML='<svg viewBox="0 0 24 24"><g>'+(st.sty.edges?'<line stroke-linecap="round"/>'.repeat(7):'')+'</g><g'+(st.sty.goo?' filter="url(#goo)"':'')+'>'+'<circle r="1.9"/>'.repeat(8)+'</g></svg>';st.boxes.push(b)});inst.push(st)});
+const t0=performance.now(),FZ=new URLSearchParams(location.search).get('t');
+(function frame(now){requestAnimationFrame(frame);const t=FZ!==null?+FZ:(now-t0)/1000;
+ const dtf=t-lzT;lzT=t;if(dtf>0&&dtf<.5)for(let i=0;i<Math.ceil(dtf/.004);i++)lz(.004);
+ const A=t*1.5,B=.5,cA=Math.cos(A),sA=Math.sin(A),cB=Math.cos(B),sB=Math.sin(B);
+ inst.forEach(st=>{const y=st.sty,ph=t/y.dur,idx=Math.floor(ph),p=ph-idx,N=st.pool.length;
+  if(idx!==st.cyc){st.cur=st.cyc<0?0:st.nxt;do{st.nxt=Math.floor(Math.random()*N)}while(st.nxt===st.cur);st.cyc=idx;st.GA=null}
+  const S0=SH[st.pool[st.cur]].f(t),S1=SH[st.pool[st.nxt]].f(t),R=y.f(S0,S1,p,t,st);
+  st.boxes.forEach(b=>{const cs=b.querySelectorAll('circle'),ls=b.querySelectorAll('line'),X=[],Y=[];
+   R.forEach(({p:[x,yy,z],k},i)=>{const x1=x*cA+z*sA,z1=-x*sA+z*cA,y1=yy*cB-z1*sB,z2=yy*sB+z1*cB;X[i]=12+x1*8.8;Y[i]=12+y1*8.8;cs[i].setAttribute('cx',X[i]);cs[i].setAttribute('cy',Y[i]);cs[i].setAttribute('r',((1.9+.6*z2)*k).toFixed(2))});
+   ls.forEach((l,n)=>{const d=dist(R[n].p,R[n+1].p),w=1.0*cl(1-(d-.7)/1.3);l.setAttribute('x1',X[n]);l.setAttribute('y1',Y[n]);l.setAttribute('x2',X[n+1]);l.setAttribute('y2',Y[n+1]);l.setAttribute('stroke-width',w.toFixed(2));l.style.display=w<.12?'none':''})})})})(performance.now());
+</script>

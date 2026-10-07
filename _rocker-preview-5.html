@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AI 电源开关 · 顶栏</title>
+<style>
+:root{
+  --bg:#212121; --side:#282828; --pill:#2c2c2c; --line:rgba(255,255,255,.08);
+  --ink:#fff; --ink2:#e2e2e5; --mute:#97979e;
+  --ok:#8bd5a8; --red:#c8372d; --warn:#ff7b72;
+  --font:"Inter","PingFang SC","Microsoft YaHei",sans-serif;
+  --slow:1;
+}
+body{margin:0;background:var(--bg);color:var(--ink2);font:14px/1.5 var(--font);padding:24px 16px 60px}
+h1{font-size:22px;color:var(--ink);margin:0 0 4px;font-weight:600}
+.sub{color:var(--mute);margin:0 0 18px;font-size:13px;max-width:900px}
+.bar{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;margin-bottom:22px;position:sticky;top:0;background:var(--bg);padding:10px 0;z-index:5;border-bottom:1px solid var(--line)}
+.seg{display:inline-flex;background:var(--pill);border-radius:8px;padding:2px}
+.seg button{border:0;background:none;color:var(--mute);font:inherit;font-size:13px;padding:5px 10px;border-radius:6px;cursor:pointer}
+.seg button.on{background:rgba(255,255,255,.12);color:var(--ink)}
+.lab{color:var(--mute);font-size:13px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:14px}
+.card{background:var(--side);border-radius:12px;padding:16px 16px 14px;display:flex;flex-direction:column}
+.card.ref{outline:1px dashed rgba(255,255,255,.18)}
+.card h2{margin:0;font-size:15px;color:var(--ink);font-weight:600}
+.card h2 b{display:inline-block;width:30px;color:var(--mute);font-weight:600}
+.card p{margin:4px 0 0 30px;color:var(--mute);font-size:12.5px;min-height:56px}
+.stage{height:150px;display:flex;align-items:center;justify-content:center}
+.stage .ps{--u:3px}
+.cap{color:var(--mute);font-size:12px;text-align:center;margin-top:6px}
+
+/* ---- 仿本地 AI 顶栏（实际大小） ---- */
+.hd{height:48px;display:flex;align-items:center;gap:8px;padding:0 16px;background:#303030;border-radius:8px;margin-top:6px}
+.hd .t{font-size:13.5px;font-weight:500;color:var(--ink);margin-right:8px;white-space:nowrap}
+.hd .g{flex:1}
+.hd .ic{width:34px;height:34px;border-radius:8px;border:0;background:transparent;color:var(--mute);cursor:pointer;display:grid;place-items:center;padding:0}
+.hd .ic:hover{background:#2f2f2f;color:var(--ink)}
+.hd .stop{position:relative;left:8px;top:1.2px;box-sizing:border-box;width:50.4px;height:24.8px;display:inline-flex;align-items:center;justify-content:center;padding:.8px 0 0 .8px;border:0;border-radius:12.4px;background:var(--red);color:#fff;font:400 12px var(--font);letter-spacing:0}
+.hd .ps,.hd .rk0{position:relative;top:1.2px}
+body[data-pos=mid] .hd .ps{order:1}
+body[data-pos=mid] .hd .stop{order:2}
+.tip{color:var(--mute);font-size:12px;margin:6px 2px 0;min-height:18px}
+.tip b{font-weight:500;color:var(--ink2)}
+
+/* ================= 新开关：共用骨架 =================
+   --u：1px 是顶栏实际大小，3px 是上面的放大样。外形 44.8×24.8 = 125% 下 56×31 设备像素，和 STOP 同高 */
+.ps{--u:1px;--dur:170ms;--ease:cubic-bezier(.4,0,.2,1);
+  --on:var(--ok); --off:var(--warn);
+  font-family:var(--font);background:none;border:0;padding:0;margin:0;cursor:pointer;display:inline-block;line-height:0;-webkit-tap-highlight-color:transparent;flex:none}
+body[data-offc=none] .ps{--off:var(--mute)}
+.ps:focus-visible{outline:2px solid #8ab4ff;outline-offset:calc(2*var(--u));border-radius:calc(7.2*var(--u))}
+.ps[disabled]{cursor:not-allowed;opacity:.38}
+.ps .bz{position:relative;display:block;width:calc(44.8*var(--u));height:calc(24.8*var(--u));box-sizing:border-box;border-radius:calc(7.2*var(--u))}
+.ps .rk{position:absolute;inset:calc(2.4*var(--u));display:flex;border-radius:calc(4.8*var(--u));overflow:hidden}
+.ps .h{flex:1;position:relative;display:grid;place-items:center;transition:background-color calc(var(--dur)*var(--slow)) var(--ease),box-shadow calc(var(--dur)*var(--slow)) var(--ease)}
+/* 记号：IEC 60417-5007「I」= 开，5008「O」= 关 */
+.ps .gI{width:calc(1.6*var(--u));height:calc(8*var(--u));border-radius:calc(.8*var(--u));background:currentColor}
+.ps .gO{width:calc(8*var(--u));height:calc(8*var(--u));border-radius:50%;box-sizing:border-box;border:calc(1.6*var(--u)) solid currentColor}
+.ps .h{color:var(--mute);transition-property:background-color,box-shadow,color}
+.ps .h.dn.i{color:var(--on)} .ps .h.dn.o{color:var(--off)}
+.ps.boot .h.dn.i{animation:boot 1s ease-in-out infinite}
+@keyframes boot{50%{opacity:.35}}
+@media (prefers-reduced-motion:reduce){.ps.boot .h.dn.i{animation:none}}
+
+/* A 平面跷板：凹下去那半暗、翘起来那半亮，明暗交界就是折线；颜色只点在按下那一头的记号上 */
+.A .bz{background:#242424;box-shadow:inset 0 0 0 1px rgba(255,255,255,.10)}
+.A .h{background:#4a4a4a;box-shadow:inset 0 1px 0 rgba(255,255,255,.10)}
+.A .h.dn{background:#2a2a2a;box-shadow:inset 0 1px 0 rgba(0,0,0,.35)}
+.A:active .h.dn{background:#262626}
+
+/* B 微倾：跷板真的绕中轴转 11°，还是平涂，不加噪点和反光 */
+.B .bz{background:#242424;box-shadow:inset 0 0 0 1px rgba(255,255,255,.10);perspective:calc(60*var(--u))}
+.B .rk{background:#424242;overflow:visible;transform-style:preserve-3d;transition:transform calc(var(--dur)*var(--slow)) var(--ease);transform:rotateY(var(--tilt))}
+.B .h{background:transparent}
+.B .h.dn{background:rgba(0,0,0,.28)}
+.B .h:not(.dn){background:rgba(255,255,255,.06)}
+.B .h:first-child{border-radius:calc(4.8*var(--u)) 0 0 calc(4.8*var(--u))}
+.B .h:last-child{border-radius:0 calc(4.8*var(--u)) calc(4.8*var(--u)) 0}
+.B[data-dn="0"]{--tilt:-11deg}   /* 左半按下：左边退进去 */
+.B[data-dn="1"]{--tilt:11deg}
+
+/* C 色块：按下那一半整块亮成信号色，像带灯的设备开关 */
+.C .bz{background:#242424;box-shadow:inset 0 0 0 1px rgba(255,255,255,.10)}
+.C .h{background:#4a4a4a;box-shadow:inset 0 1px 0 rgba(255,255,255,.10)}
+.C .h.dn.i{background:#2f8a57;color:#fff;box-shadow:none}
+.C .h.dn.o{background:var(--red);color:#fff;box-shadow:none}
+body[data-offc=none] .C .h.dn.o{background:#2a2a2a;color:var(--mute);box-shadow:inset 0 1px 0 rgba(0,0,0,.35)}
+
+/* ===== E 原版（对照，原样搬过来；记号固定 I 在左） ===== */
+.rk0{--on-c:#3dae6a;--off-c:#d84a4a;--ang:15deg;--dur:170ms;--ease:cubic-bezier(.4,0,.2,1);--mk:rgba(255,255,255,.72);--pz:0em;
+  --noise:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 .12 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  font-size:12.4px;background:none;border:0;padding:0;margin:0;cursor:pointer;display:inline-block;line-height:0;flex:none}
+.stage .rk0{font-size:37.2px}
+.rk0:active{--pz:-.1em}
+.rk0 .fr{position:relative;display:block;width:3.6em;height:2em;border-radius:.42em;background:var(--noise),linear-gradient(#262626,#141414);box-shadow:0 .05em .14em rgba(0,0,0,.45)}
+.rk0 .hole{position:absolute;inset:.2em;border-radius:.3em;background:#000;perspective:12em;box-shadow:inset 0 .05em .12em rgba(0,0,0,.5)}
+.rk0 .rc{position:absolute;inset:.07em;border-radius:.22em;background:var(--noise),linear-gradient(#262626,#0e0e0e);box-shadow:inset 0 .05em .03em rgba(255,255,255,.16);transform-style:preserve-3d;transform:translateZ(var(--pz)) rotateY(var(--ang));transition:transform calc(var(--dur)*var(--slow)) var(--ease)}
+.rk0[aria-pressed=true] .rc{transform:translateZ(var(--pz)) rotateY(calc(var(--ang)*-1))}
+.rk0 .wl,.rk0 .wr{position:absolute;top:.04em;bottom:.04em;width:.6em;transition:opacity calc(var(--dur)*var(--slow)*.6) linear}
+.rk0 .wr{right:0;transform-origin:100% 50%;transform:rotateY(-110deg);background:var(--on-c);opacity:0}
+.rk0 .wl{left:0;transform-origin:0 50%;transform:rotateY(110deg);background:var(--off-c)}
+.rk0[aria-pressed=true] .wr{opacity:1}.rk0[aria-pressed=true] .wl{opacity:0}
+.rk0 .fc,.rk0 .fc2{position:absolute;inset:0;border-radius:inherit;transform:translateZ(.005em);transition:opacity calc(var(--dur)*var(--slow)) var(--ease);pointer-events:none}
+.rk0 .fc{background:linear-gradient(90deg,rgba(255,255,255,.2),rgba(255,255,255,0) 48%,rgba(0,0,0,.16))}
+.rk0 .fc2{background:linear-gradient(270deg,rgba(255,255,255,.2),rgba(255,255,255,0) 48%,rgba(0,0,0,.16));opacity:0}
+.rk0[aria-pressed=true] .fc{opacity:0}.rk0[aria-pressed=true] .fc2{opacity:1}
+.rk0 .mi,.rk0 .mo{position:absolute;top:50%;left:var(--x);transform:translate(-50%,-50%) translateZ(.01em);pointer-events:none}
+.rk0 .mi{--x:28%;width:.085em;height:.5em;background:var(--mk);border-radius:.02em}
+.rk0 .mo{--x:72%;width:.42em;height:.42em;border-radius:50%;box-shadow:inset 0 0 0 .075em var(--mk)}
+.rk0[disabled]{opacity:.38;cursor:not-allowed}
+</style>
+</head>
+<body data-ord="OI" data-offc="red" data-pos="left">
+<h1>AI 电源开关 · 放进顶栏</h1>
+<p class="sub">顶栏里「● AI ON」那一块拿掉，换成这个开关；齿轮菜单里的「AI ON / AI OFF」按钮也去掉。每张卡下面是顶栏实际大小（和 STOP 同高 24.8px），点开关试：打开后记号闪约 3 秒＝模型正在装进显存（真机约 7 秒），停闪＝已上线。</p>
+
+<div class="bar">
+  <span class="lab">记号顺序</span>
+  <span class="seg" id="ord"><button data-v="OI" class="on">O｜I（左关右开）</button><button data-v="IO">I｜O（左开右关）</button></span>
+  <span class="lab">关的时候</span>
+  <span class="seg" id="offc"><button data-v="red" class="on">亮红</button><button data-v="none">不亮</button></span>
+  <span class="lab">位置</span>
+  <span class="seg" id="pos"><button data-v="left" class="on">齿轮左边</button><button data-v="mid">齿轮和 STOP 之间</button></span>
+  <span class="lab">速度</span>
+  <span class="seg" id="slow"><button data-v="1" class="on">正常</button><button data-v="5">慢放 ×5</button></span>
+  <span class="lab">声音</span>
+  <span class="seg" id="snd"><button data-v="0" class="on">关</button><button data-v="1">咔哒声</button></span>
+  <span class="lab">模拟</span>
+  <span class="seg" id="sim"><button data-v="ok" class="on">正常</button><button data-v="down">Ollama 未启动</button><button data-v="game">游戏抢显卡</button></span>
+</div>
+
+<div class="grid" id="grid"></div>
+
+<script>
+const V = [
+  ['A', '平面跷板', '外形照经典设备开关：外框、跷板、中间折线、I / O 记号。画法照本地 AI：平涂、1px 细边、不加噪点和反光。按下那半暗、翘起那半亮；颜色只点在按下那一头的记号上。'],
+  ['B', '微倾', '同 A 的平涂，但跷板真的绕中轴转 11°（E 原版 15°），按下时看得到它翻过去。'],
+  ['C', '色块', '按下那一半整块亮成信号色：开＝绿块里白色 I，关＝红块里白色 O。离远了也一眼看清；红块和 STOP 同一种红。'],
+  ['E', 'E 原版', '对照，原样缩到顶栏大小。记号固定 I 在左；注意它开的时候绿色露在 O 那一头。', 1],
+];
+const glyph = (k) => `<span class="h ${k === 'I' ? 'i' : 'o'}"><i class="g${k}"></i></span>`;
+const ps = (v) => v === 'E'
+  ? `<button type="button" class="rk0 sw-ai" aria-pressed="false" aria-label="AI 电源"><span class="fr"><span class="hole"><span class="rc"><i class="wl"></i><i class="wr"></i><i class="fc"></i><i class="fc2"></i><i class="mi"></i><i class="mo"></i></span></span></span></button>`
+  : `<button type="button" class="ps ${v} sw-ai" aria-pressed="false" aria-label="AI 电源"><span class="bz"><span class="rk"></span></span></button>`;
+const GEAR = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></svg>';
+document.getElementById('grid').innerHTML = V.map(([v, n, d, ref]) => `<div class="card${ref ? ' ref' : ''}" data-v="${v}"><h2><b>${v}</b>${n}</h2><p>${d}</p><div class="stage">${ps(v)}</div><div class="hd"><span class="t">对话</span><span class="g"></span>${ps(v)}<button class="ic" title="设置">${GEAR}</button><button class="stop">STOP</button></div><div class="tip"></div><div class="cap">↑ 顶栏实际大小</div></div>`).join('');
+
+// 每张卡一个状态：off / boot / on；两只开关（放大样和顶栏）跟着同一个状态走
+const st = {}; let sim = 'ok';
+function paint(card) {
+  const v = card.dataset.v, s = sim === 'down' ? 'down' : (st[v] || 'off');
+  const on = s === 'on' || s === 'boot', ord = document.body.dataset.ord;
+  card.querySelectorAll('.sw-ai').forEach((b) => {
+    b.disabled = s === 'down'; b.setAttribute('aria-pressed', on);
+    b.title = s === 'down' ? 'Ollama 未启动' : s === 'boot' ? 'AI 上线中…' : on ? 'AI 已上线：点一下下线' : 'AI 已下线：点一下上线';
+    if (v === 'E') return;
+    b.classList.toggle('boot', s === 'boot');
+    const ks = ord === 'OI' ? ['O', 'I'] : ['I', 'O'], dn = ks.indexOf(on ? 'I' : 'O');
+    const rk = b.querySelector('.rk');
+    if (rk.dataset.ord !== ord) { rk.dataset.ord = ord; rk.innerHTML = ks.map(glyph).join(''); }
+    rk.querySelectorAll('.h').forEach((h, i) => h.classList.toggle('dn', i === dn));
+    b.dataset.dn = dn;
+  });
+  card.querySelector('.tip').innerHTML = s === 'down' ? '悬停提示：<b>Ollama 未启动</b>（开关变灰，点不动）'
+    : s === 'boot' ? '悬停提示：<b>AI 上线中…</b>' : sim === 'game' && !on ? '悬停提示：<b>AI 已下线</b> · 检测到 game.exe（开关自己弹回关）' : '悬停提示：<b>' + (on ? 'AI 已上线' : 'AI 已下线') + '</b>';
+}
+const paintAll = () => document.querySelectorAll('.card').forEach(paint);
+paintAll();
+
+let ac = null, sound = false;
+function click() {
+  if (!sound) return;
+  ac = ac || new AudioContext();
+  const t = ac.currentTime, sr = ac.sampleRate;
+  [[0, 2600, .5], [.022, 1400, .28]].forEach(([dt, f, g]) => {
+    const n = Math.floor(sr * .012), b = ac.createBuffer(1, n, sr), d = b.getChannelData(0);
+    for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / n, 4);
+    const s = ac.createBufferSource(); s.buffer = b;
+    const bp = ac.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = f; bp.Q.value = 1.6;
+    const gn = ac.createGain(); gn.gain.value = g;
+    s.connect(bp).connect(gn).connect(ac.destination); s.start(t + dt);
+  });
+}
+const timers = {};
+document.addEventListener('click', (e) => {
+  const sw = e.target.closest('.sw-ai');
+  if (sw) {
+    const card = sw.closest('.card'), v = card.dataset.v;
+    clearTimeout(timers[v]);
+    if ((st[v] || 'off') === 'off') { st[v] = 'boot'; timers[v] = setTimeout(() => { st[v] = 'on'; paint(card); }, 3000); }
+    else st[v] = 'off';
+    paint(card); click(); return;
+  }
+  const b = e.target.closest('.seg button'); if (!b) return;
+  b.parentNode.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
+  const id = b.parentNode.id, val = b.dataset.v;
+  if (id === 'slow') document.documentElement.style.setProperty('--slow', val);
+  else if (id === 'snd') { sound = val === '1'; click(); }
+  else if (id === 'sim') { sim = val; if (val === 'game') Object.keys(st).forEach((k) => { clearTimeout(timers[k]); st[k] = 'off'; }); }
+  else document.body.dataset[id] = val;
+  paintAll();
+});
+</script>
+</body>
+</html>

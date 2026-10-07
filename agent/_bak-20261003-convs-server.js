@@ -1,0 +1,275 @@
+'use strict';
+// REIZE助手 · 网页界面服务。只监听 127.0.0.1，需要口令 cookie；打开方式：node server.js（会自动打开浏览器）。
+const http = require('http');
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
+const { spawn } = require('child_process');
+const { createCore } = require('./core');
+const leads = require('./leads');
+const power = require('./power');
+const desktop = require('./desktop');
+
+const cfg = JSON.parse(fs.readFileSync(path.join(__dirname, 'config.json'), 'utf8'));
+if (process.argv.includes('--online')) cfg.online = true;
+const PORT = cfg.port || 5200;
+
+// ---------- 口令（重启后保持不变，浏览器不用重新登录） ----------
+const TOKENF = path.join(__dirname, '.token');
+let TOKEN = ''; try { TOKEN = fs.readFileSync(TOKENF, 'utf8').trim(); } catch (e) {}
+if (TOKEN.length < 20) { TOKEN = crypto.randomBytes(24).toString('hex'); fs.writeFileSync(TOKENF, TOKEN); }
+
+// ---------- 状态 ----------
+const clients = new Set();
+const tr = [];                 // 对话记录，给刷新页面后回放
+const leadLog = [];
+let busy = null;               // null | '对话' | '任务队列' | '线索挖掘' | 'AI 上线/下线'
+let unattended = false;
+const queue = { items: [], cancel: false };
+const pending = new Map(); let cid = 0;
+
+const bc = (type, data) => { const s = `event: ${type}\ndata: ${JSON.stringify(data)}\n\n`; for (const c of clients) { try { c.write(s); } catch (e) {} } };
+const push = (it) => { tr.push(it); if (tr.length > 400) tr.shift(); };
+const notice = (text) => { push({ role: 'notice', text }); bc('notice', { text }); };
+
+function onEvent(type, d) {
+  if (type === 'token') {
+    let last = tr[tr.length - 1];
+    if (!last || last.role !== 'ai' || last.done) { last = { role: 'ai', text: '' }; push(last); }
+    last.text += d.text; bc('token', d); return;
+  }
+  const last = tr[tr.length - 1]; if (last && last.role === 'ai') last.done = true;
+  if (type === 'tool') push({ role: 'tool', name: d.name, args: d.args });
+  else if (type === 'toolresult') push({ role: 'result', name: d.name, text: d.text });
+  else if (type === 'notice') push({ role: 'notice', text: d.text });
+  else if (type === 'error') push({ role: 'notice', text: '出错: ' + d.text });
+  else if (type === 'stopped') push({ role: 'notice', text: '已急停。' });
+  else if (type === 'lead') { leadLog.push(d); if (leadLog.length > 400) leadLog.shift(); }
+  bc(type, d);
+}
+
+function ask(q, detail) {
+  if (unattended) {          // 无人值守：只允许往 任务结果/草稿/线索 写文件，其余一律拒绝
+    const ok = detail.kind === 'write' && ['任务结果', '草稿', '线索'].some((d) => path.resolve(detail.path).startsWith(path.join(core.WS, d) + path.sep));
+    notice((ok ? '无人值守，自动允许: ' : '无人值守，已拒绝: ') + q);
+    return Promise.resolve(ok);
+  }
+  const id = ++cid;
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => { if (pending.delete(id)) { notice('确认超时(15 分钟)，已按拒绝处理: ' + q); bc('confirm_done', { id }); resolve(false); } }, 15 * 60 * 1000);
+    pending.set(id, { q, detail, resolve: (ok) => { clearTimeout(timer); resolve(ok); } });
+    push({ role: 'confirm', id, q, detail }); bc('confirm', { id, q, detail });
+  });
+}
+
+const core = createCore(cfg, { ask, emit: onEvent });
+const pw = power.make(cfg);
+const desk = desktop.install(core, cfg);
+const auto = require('./auto').create({ cfg, pw, getBusy: () => busy, setBusy: (v) => { busy = v; bc('state', {}); }, notify: (t) => notice(t),
+  notGameUrl: (name) => `http://127.0.0.1:${PORT}/api/notgame?name=${encodeURIComponent(name)}&t=${TOKEN}`,
+  onEvent: (type, d) => {
+    if (type === 'autooff') { bar = { id: ++cid, kind: 'autooff', name: d.name, text: `检测到 ${d.title ? `「${d.title}」(${d.name})` : d.name} 在运行，AI 已自动下线。` }; bc('bar', {}); }
+    else if (type === 'autoon') { bar = null; bc('bar', {}); }
+    bc('state', {});
+  } });
+const { execFileSync } = require('child_process');
+// 游戏运行时用户想上线：不直接上线，页面上方出现「强制上线 / 取消」条
+let bar = null;   // 页面上方的选择条：{ id, kind: 'force' | 'autooff', name, text, pendingText }
+function offerForce(g, pendingText) {
+  const shown = g.title ? `「${g.title}」(${g.name})` : g.name;
+  const text = `检测到 ${shown} 在运行，上线会占用约 19GB 显存，可能影响游戏。`;
+  bar = { id: ++cid, kind: 'force', name: g.name, text, pendingText: pendingText || '' };
+  auto.keepOffline();
+  notice(text + 'AI 暂时没有上线。请点页面上方的「强制上线」「这不是游戏」或「取消」；不点的话，游戏关闭后会自动上线。' + (pendingText ? '你刚才那句话会在强制上线后接着处理。' : ''));
+  bc('bar', {}); bc('state', {});
+}
+// 助手关掉时让模型一起下线（模型是「一直在线」的，不然助手关了显存还被占着）
+process.on('exit', () => { desk.close(); auto.close(); try { execFileSync('curl.exe', ['--noproxy', '*', '-s', '-m', '5', '-d', '@-', cfg.ollama + '/api/generate'], { input: JSON.stringify({ model: cfg.model, keep_alive: 0 }), stdio: ['pipe', 'ignore', 'ignore'] }); } catch (e) {} });
+for (const sg of ['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGBREAK']) process.on(sg, () => process.exit(0));
+
+// ---------- 动作 ----------
+async function doSend(text) {
+  push({ role: 'user', text }); bc('user', { text });
+  const am = auto.detect(text);
+  if (am) { auto.set(am === 'on'); notice(am === 'on' ? '自动模式已打开：检测到游戏时 AI 自动下线，游戏关闭后自动上线。' : '自动模式已关闭：AI 不会再自动上线/下线，需要时请自己点按钮。'); bc('state', {}); return; }
+  const act = pw.detect(text);
+  busy = act ? 'AI 上线/下线' : '对话'; bc('state', {});
+  try {
+    if (act === 'on') { const g = auto.blocking(); if (g && (await pw.status()).state === 'off') { offerForce(g); return; } }
+    if (act) { const r = act === 'off' ? await pw.off() : await pw.on(); notice(r.text); if (r.ok) auto.manual(act); return; }
+    unattended = false; core.resetStop();
+    if ((await pw.status()).state === 'off') {
+      const g = auto.blocking(); if (g) { offerForce(g, text); return; }
+      notice('AI 当前下线，正在自动上线，约需 7 秒…');
+    }
+    await core.turn(text);
+  } catch (e) { /* 错误已通过事件通知界面 */ }
+  finally { busy = null; bc('state', {}); }
+}
+
+async function runQueue(items) {
+  busy = '任务队列'; unattended = true; queue.cancel = false; core.resetStop();
+  queue.items = items.map((t, i) => ({ id: i + 1, text: t, status: '等待' })); bc('queue', queue);
+  const dir = path.join(core.WS, '任务结果'); fs.mkdirSync(dir, { recursive: true });
+  const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
+  notice('任务队列开始，共 ' + items.length + ' 项。无人值守：只允许写入「任务结果 / 草稿 / 线索」文件夹，不运行命令、不删除。');
+  try {
+    if ((await pw.status()).state === 'off') notice('AI 当前下线，正在自动上线，约需 7 秒…');
+    for (const it of queue.items) {
+      if (queue.cancel) { it.status = '已取消'; continue; }
+      it.status = '运行中'; bc('queue', queue); core.clear(); core.resetStop();
+      try {
+        const r = await core.turn('（无人值守任务：不能运行命令或删除文件；需要保存结果时写到「任务结果」文件夹里。）\n' + it.text);
+        fs.writeFileSync(path.join(dir, `${stamp}-${it.id}.md`), `# 任务 ${it.id}\n\n${it.text}\n\n---\n\n${r || '(没有文字回复)'}\n`, 'utf8');
+        it.status = queue.cancel ? '已停止' : '完成';
+      } catch (e) { it.status = '出错'; }
+      bc('queue', queue);
+    }
+  } finally { unattended = false; busy = null; notice('任务队列结束。结果在「文件」页的「任务结果」里。'); bc('state', {}); bc('queue', queue); }
+}
+
+async function runLeads(opt) {
+  busy = '线索挖掘'; unattended = false; core.resetStop(); leadLog.length = 0; bc('state', {});
+  try {
+    if ((await pw.status()).state === 'off') onEvent('lead', { type: 'log', text: 'AI 当前下线，正在自动上线，约需 7 秒…' });
+    await leads.run(core, opt);
+  } catch (e) { onEvent('lead', { type: 'log', text: e.name === 'StopError' ? '已急停。' : '出错: ' + e.message }); onEvent('lead', { type: 'end' }); }
+  finally { busy = null; bc('state', {}); }
+}
+
+const DIRS = ['线索', '草稿', '任务结果'];
+function listFiles() {
+  const out = {};
+  for (const d of DIRS) {
+    const p = path.join(core.WS, d);
+    out[d] = fs.existsSync(p) ? fs.readdirSync(p).filter((n) => fs.statSync(path.join(p, n)).isFile()).map((n) => { const s = fs.statSync(path.join(p, n)); return { name: n, size: s.size, mtime: s.mtimeMs }; }).sort((a, b) => b.mtime - a.mtime).slice(0, 200) : [];
+  }
+  return out;
+}
+
+async function state() {
+  const st = await pw.status();
+  return { online: cfg.online, think: cfg.think, desktop: desk.get(), auto: auto.get(), bar: bar ? { id: bar.id, kind: bar.kind, name: bar.name, text: bar.text } : null, ai: st, busy, ws: core.WS, kbDir: cfg.kbDir, queue, pending: [...pending.entries()].map(([id, p]) => ({ id, q: p.q, detail: p.detail })), tr: tr.slice(-200), leadLog: leadLog.slice(-200) };
+}
+
+// ---------- HTTP ----------
+const json = (res, code, obj) => { res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(obj)); };
+const readBody = (req) => new Promise((res, rej) => { let b = ''; req.on('data', (d) => { b += d; if (b.length > 1e6) { req.destroy(); rej(new Error('too big')); } }); req.on('end', () => { try { res(b ? JSON.parse(b) : {}); } catch (e) { rej(e); } }); });
+const cookieOf = (req) => (/(?:^|;\s*)ait=([a-f0-9]+)/.exec(req.headers.cookie || '') || [])[1] || '';
+
+const server = http.createServer(async (req, res) => {
+  try {
+    const host = req.headers.host || '';
+    if (!/^(127\.0\.0\.1|localhost):\d+$/.test(host)) { res.writeHead(403); return res.end('forbidden'); }   // 防 DNS 重绑定
+    const url = new URL(req.url, 'http://' + host);
+    if (req.method === 'GET' && url.pathname === '/api/notgame' && url.searchParams.get('t') === TOKEN) {
+      const r = await auto.notGame(url.searchParams.get('name')); notice(r.text); if (bar && bar.name && bar.name.toLowerCase() === String(url.searchParams.get('name')).toLowerCase()) { bar = null; bc('bar', {}); }
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      return res.end(`<!doctype html><meta charset="utf-8"><title>REIZE助手</title><body style="font:16px system-ui,'Microsoft YaHei UI';padding:40px;color:#18181b"><h2>${r.ok ? '已记住' : '没成功'}</h2><p>${String(r.text).replace(/[<>&]/g, '')}</p><p>可以关掉这个页面了。</p></body>`);
+    }
+    if (url.pathname === '/' && url.searchParams.get('t') === TOKEN) {
+      res.writeHead(302, { 'Set-Cookie': `ait=${TOKEN}; HttpOnly; SameSite=Strict; Path=/; Max-Age=31536000`, Location: '/' }); return res.end();
+    }
+    if (cookieOf(req) !== TOKEN) { res.writeHead(401, { 'Content-Type': 'text/plain; charset=utf-8' }); return res.end('请用启动程序打印出来的地址打开（带 ?t= 口令）。'); }
+    if (req.method === 'POST') { const o = req.headers.origin; if (o && o !== 'http://' + host) { res.writeHead(403); return res.end('bad origin'); } }
+
+    if (req.method === 'GET' && url.pathname === '/') { res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }); return res.end(fs.readFileSync(path.join(__dirname, 'ui.html'))); }
+    if (req.method === 'GET' && url.pathname === '/api/state') return json(res, 200, await state());
+    if (req.method === 'GET' && url.pathname === '/api/events') {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', Connection: 'keep-alive' });
+      res.write(': ok\n\n'); clients.add(res); req.on('close', () => clients.delete(res)); return;
+    }
+    if (req.method === 'GET' && url.pathname === '/api/files') return json(res, 200, listFiles());
+    if (req.method === 'GET' && url.pathname === '/api/file') {
+      const d = url.searchParams.get('dir'), n = path.basename(url.searchParams.get('name') || '');
+      if (!DIRS.includes(d) || !n) return json(res, 400, { error: 'bad' });
+      const f = path.join(core.WS, d, n); if (!fs.existsSync(f)) return json(res, 404, { error: 'no' });
+      return json(res, 200, { name: n, text: fs.readFileSync(f, 'utf8').slice(0, 200000) });
+    }
+
+    if (req.method === 'POST') {
+      const b = await readBody(req);
+      if (url.pathname === '/api/send') {
+        if (busy) return json(res, 409, { error: '正忙：' + busy + '，等它结束或点急停' });
+        const text = String(b.text || '').trim(); if (!text) return json(res, 400, { error: '空消息' });
+        doSend(text); return json(res, 200, { ok: true });
+      }
+      if (url.pathname === '/api/confirm') {
+        const p = pending.get(Number(b.id)); if (!p) return json(res, 404, { error: '已过期' });
+        pending.delete(Number(b.id)); p.resolve(!!b.ok);
+        for (const it of tr) if (it.role === 'confirm' && it.id === Number(b.id)) it.answered = b.ok ? '已同意' : '已拒绝';
+        bc('confirm_done', { id: Number(b.id), answered: b.ok ? '已同意' : '已拒绝' }); return json(res, 200, { ok: true });
+      }
+      if (url.pathname === '/api/stop') {
+        queue.cancel = true; core.stop();
+        for (const [id, p] of pending) { pending.delete(id); p.resolve(false); bc('confirm_done', { id, answered: '已拒绝' }); }
+        return json(res, 200, { ok: true });
+      }
+      if (url.pathname === '/api/settings') {
+        if (typeof b.online === 'boolean') cfg.online = b.online;
+        if (typeof b.think === 'boolean') cfg.think = b.think;
+        if (typeof b.auto === 'boolean') { auto.set(b.auto); notice(b.auto ? '自动模式已打开：检测到游戏时 AI 自动下线，游戏关闭后自动上线。' : '自动模式已关闭：AI 不会再自动上线/下线，需要时请自己点按钮。'); }
+        if (typeof b.desktop === 'boolean') { desk.set(b.desktop); notice(b.desktop ? '桌面控制已打开：AI 现在可以看屏幕、操作鼠标键盘（每次任务第一次操作前会问你）。急停：右上角按钮 / Ctrl+Alt+End / 鼠标甩到左上角。' : '桌面控制已关闭。'); }
+        bc('state', {}); return json(res, 200, { ok: true });
+      }
+      if (url.pathname === '/api/clear') { if (busy) return json(res, 409, { error: '正忙' }); core.clear(); tr.length = 0; bc('cleared', {}); return json(res, 200, { ok: true }); }
+      if (url.pathname === '/api/power') {
+        if (busy) return json(res, 409, { error: '正在' + busy + '，先等它结束或点急停' });
+        if (b.action !== 'off') { const g = auto.blocking(); if (g && (await pw.status()).state === 'off') { offerForce(g); return json(res, 200, { ok: false, blocked: true, text: `检测到 ${g.title || g.name} 在运行，AI 暂不上线（请选择强制上线、这不是游戏或取消）。` }); } }
+        busy = 'AI 上线/下线'; bc('state', {});
+        try { const r = b.action === 'off' ? await pw.off() : await pw.on(); notice(r.text); if (r.ok) auto.manual(b.action === 'off' ? 'off' : 'on'); return json(res, 200, r); }
+        finally { busy = null; bc('state', {}); }
+      }
+      if (url.pathname === '/api/choice') {
+        if (!bar || bar.id !== Number(b.id)) return json(res, 404, { error: '这个选择已过期' });
+        const c = bar; bar = null; bc('bar', {}); bc('state', {});
+        if (b.key === 'notgame') { const r = await auto.notGame(c.name); notice(r.text); return json(res, 200, r); }
+        if (b.key === 'ack') return json(res, 200, { ok: true });
+        if (b.key !== 'force') { notice('已取消，AI 保持下线。游戏关闭后会自动上线。'); return json(res, 200, { ok: true }); }
+        if (busy) { notice('现在正忙（' + busy + '），请稍后再点强制上线。'); return json(res, 409, { error: '正忙' }); }
+        busy = 'AI 上线/下线'; bc('state', {});
+        let r; try { r = await pw.on(); notice(r.ok ? '已强制上线（游戏期间不再自动下线，游戏关闭后恢复自动模式）。' + r.text : r.text); if (r.ok) auto.forceOn(); } finally { busy = null; bc('state', {}); }
+        json(res, 200, { ok: !!(r && r.ok) });
+        if (r && r.ok && c.pendingText) { busy = '对话'; bc('state', {}); try { unattended = false; core.resetStop(); await core.turn(c.pendingText); } catch (e) {} finally { busy = null; bc('state', {}); } }
+        return;
+      }
+      if (url.pathname === '/api/queue') {
+        if (busy) return json(res, 409, { error: '正忙：' + busy });
+        if ((await pw.status()).state === 'off' && auto.blocking()) return json(res, 409, { error: `检测到 ${auto.blocking().title || auto.blocking().name} 在运行，AI 下线中。先在对话页说「AI上线」并选「强制上线」，或等游戏关闭后再开始。` });
+        const items = (b.items || []).map((x) => String(x).trim()).filter(Boolean).slice(0, 50); if (!items.length) return json(res, 400, { error: '没有任务' });
+        runQueue(items); return json(res, 200, { ok: true });
+      }
+      if (url.pathname === '/api/leads') {
+        if (busy) return json(res, 409, { error: '正忙：' + busy });
+        if ((await pw.status()).state === 'off' && auto.blocking()) return json(res, 409, { error: `检测到 ${auto.blocking().title || auto.blocking().name} 在运行，AI 下线中。先在对话页说「AI上线」并选「强制上线」，或等游戏关闭后再开始。` });
+        if (!cfg.online) return json(res, 400, { error: '线索挖掘需要联网，请先打开「联网」开关' });
+        const country = String(b.country || '').trim(); if (!country) return json(res, 400, { error: '请填国家' });
+        runLeads({ country, product: ['blown', 'bag', 'both'].includes(b.product) ? b.product : 'both', max: Math.min(Math.max(parseInt(b.max, 10) || 20, 1), 200), draft: b.draft !== false });
+        return json(res, 200, { ok: true });
+      }
+      if (url.pathname === '/api/open') {
+        if (!DIRS.includes(b.dir)) return json(res, 400, { error: 'bad' });
+        const p = path.join(core.WS, b.dir); fs.mkdirSync(p, { recursive: true });
+        spawn('explorer.exe', [p], { detached: true, stdio: 'ignore' }).unref(); return json(res, 200, { ok: true });
+      }
+    }
+    res.writeHead(404); res.end('not found');
+  } catch (e) { try { json(res, 500, { error: e.message }); } catch (e2) {} }
+});
+
+const openUi = (url) => { const edge = ['ProgramFiles(x86)', 'ProgramFiles'].map((k) => path.join(process.env[k] || '', 'Microsoft', 'Edge', 'Application', 'msedge.exe')).find((p) => fs.existsSync(p)); (edge ? spawn(edge, ['--app=' + url], { detached: true, stdio: 'ignore' }) : spawn('cmd', ['/c', 'start', '', url], { detached: true, stdio: 'ignore' })).unref(); };
+setInterval(() => { for (const c of clients) { try { c.write(': hb\n\n'); } catch (e) {} } }, 20000);
+server.listen(PORT, '127.0.0.1', async () => {
+  const url = `http://127.0.0.1:${PORT}/?t=${TOKEN}`;
+  const st = await pw.status();
+  console.log(`REIZE助手 网页界面已启动\n地址: ${url}\nAI: ${st.state === 'on' ? '在线' : st.state === 'off' ? '下线' : 'Ollama 服务没有运行'}   联网: ${cfg.online ? '开' : '关'}   自动模式: ${auto.get().on ? '开' : '关'}\n关闭这个窗口(模型会一起下线) = 停止助手。`);
+  if (!process.argv.includes('--no-open')) openUi(url);
+});
+server.on('error', (e) => {
+  if (e.code === 'EADDRINUSE') {
+    console.log(`助手已经在运行了，正在为你打开界面……`);
+    if (!process.argv.includes('--no-open')) openUi(`http://127.0.0.1:${PORT}/?t=${TOKEN}`);
+    return setTimeout(() => process.exit(0), 1500);
+  }
+  console.log('启动失败: ' + e.message); process.exit(1);
+});

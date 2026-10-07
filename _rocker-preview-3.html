@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>设备电源开关</title>
+<style>
+:root{
+  --bg:#212121; --side:#282828; --pill:#2c2c2c; --line:rgba(255,255,255,.08);
+  --ink:#fff; --ink2:#e2e2e5; --mute:#97979e;
+  --font:"Inter","PingFang SC","Microsoft YaHei",sans-serif;
+  --slow:1;
+  --noise:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 .12 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+body{margin:0;background:var(--bg);color:var(--ink2);font:14px/1.5 var(--font);padding:24px 16px 60px}
+h1{font-size:22px;color:var(--ink);margin:0 0 4px;font-weight:600}
+.sub{color:var(--mute);margin:0 0 18px;font-size:13px;max-width:900px}
+.bar{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;margin-bottom:22px;position:sticky;top:0;background:var(--bg);padding:10px 0;z-index:5;border-bottom:1px solid var(--line)}
+.seg{display:inline-flex;background:var(--pill);border-radius:8px;padding:2px}
+.seg button{border:0;background:none;color:var(--mute);font:inherit;font-size:13px;padding:5px 10px;border-radius:6px;cursor:pointer}
+.seg button.on{background:rgba(255,255,255,.12);color:var(--ink)}
+.lab{color:var(--mute);font-size:13px}
+.btn{border:0;background:rgba(255,255,255,.07);color:var(--ink2);font:inherit;font-size:13px;height:30px;padding:0 12px;border-radius:8px;cursor:pointer}
+.btn:hover{background:rgba(255,255,255,.12);color:var(--ink)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}
+.card{background:var(--side);border-radius:12px;padding:16px 16px 14px;display:flex;flex-direction:column}
+.card.ref{outline:1px dashed rgba(255,255,255,.18)}
+.card h2{margin:0;font-size:15px;color:var(--ink);font-weight:600}
+.card h2 b{display:inline-block;width:34px;color:var(--mute);font-weight:600}
+.card p{margin:4px 0 0 34px;color:var(--mute);font-size:12.5px;min-height:38px}
+.stage{height:150px;display:flex;align-items:center;justify-content:center}
+.stage .rk{--fs:34px}
+.pop{background:#2f2f2f;border-radius:10px;padding:6px;display:flex;flex-direction:column;gap:4px;width:200px;align-self:center}
+.row{display:flex;align-items:center;justify-content:space-between;height:34px;padding:0 10px 0 12px;border-radius:8px;background:rgba(255,255,255,.07);color:var(--ink2);font-size:13px}
+.row .rk{--fs:10px}
+.cap{color:var(--mute);font-size:12px;text-align:center;margin-top:6px}
+
+/* ===== 结构（沿用第一版 E） ===== */
+.rk{
+  --on-c:#3dae6a; --off-c:#d84a4a; --neu:#222;
+  --frame:linear-gradient(#262626,#141414); --hole:#000; --body:linear-gradient(#262626,#0e0e0e);
+  --ang:15deg; --dur:170ms; --ease:cubic-bezier(.4,0,.2,1);
+  --fw:3.6em; --fh:2em; --fr-r:.42em; --hole-in:.2em; --hole-r:.3em; --rc-r:.22em; --dep:.6em;
+  --fr-sh:0 .05em .14em rgba(0,0,0,.45); --rc-sh:inset 0 .05em .03em rgba(255,255,255,.16);
+  --mk:rgba(255,255,255,.72); --pz:0em; --glow:transparent;
+  font-size:var(--fs,10px);background:none;border:0;padding:0;margin:0;cursor:pointer;display:inline-block;line-height:0;-webkit-tap-highlight-color:transparent
+}
+.rk:focus-visible{outline:2px solid #8ab4ff;outline-offset:.15em;border-radius:var(--fr-r)}
+.rk:active{--pz:-.1em}
+body[data-ind=g] .rk{--off-c:var(--neu)}
+body[data-ind=r] .rk{--on-c:#d84a4a;--off-c:var(--neu)}
+.fr{position:relative;display:block;width:var(--fw);height:var(--fh);border-radius:var(--fr-r);background:var(--frame);box-shadow:var(--fr-sh)}
+.hole{position:absolute;inset:var(--hole-in);border-radius:var(--hole-r);background:var(--hole);perspective:12em;box-shadow:inset 0 .05em .12em rgba(0,0,0,.5)}
+.hole::after{content:"";position:absolute;inset:-.1em;border-radius:inherit;box-shadow:0 0 .5em .05em var(--glow);opacity:0;transition:opacity calc(var(--dur) * var(--slow));pointer-events:none}
+.rk[aria-pressed=true] .hole::after{opacity:1}
+.rc{position:absolute;inset:.07em;border-radius:var(--rc-r);background:var(--noise),var(--body);box-shadow:var(--rc-sh);
+  transform-style:preserve-3d;transform:translateZ(var(--pz)) rotateY(var(--ang));
+  transition:transform calc(var(--dur) * var(--slow)) var(--ease)}
+.rk[aria-pressed=true] .rc{transform:translateZ(var(--pz)) rotateY(calc(var(--ang) * -1))}
+.wl,.wr{position:absolute;top:.04em;bottom:.04em;width:var(--dep);transition:opacity calc(var(--dur) * var(--slow) * .6) linear}
+.wr{right:0;transform-origin:100% 50%;transform:rotateY(-110deg);background:var(--on-c);opacity:0}
+.wl{left:0;transform-origin:0 50%;transform:rotateY(110deg);background:var(--off-c)}
+.rk[aria-pressed=true] .wr{opacity:1}.rk[aria-pressed=true] .wl{opacity:0}
+.fc,.fc2,.lit{position:absolute;inset:0;border-radius:inherit;transform:translateZ(.005em);transition:opacity calc(var(--dur) * var(--slow)) var(--ease);pointer-events:none}
+.fc{background:linear-gradient(90deg,rgba(255,255,255,.2),rgba(255,255,255,0) 48%,rgba(0,0,0,.16))}
+.fc2{background:linear-gradient(270deg,rgba(255,255,255,.2),rgba(255,255,255,0) 48%,rgba(0,0,0,.16));opacity:0}
+.rk[aria-pressed=true] .fc{opacity:0}.rk[aria-pressed=true] .fc2{opacity:1}
+.lit{display:none;opacity:0}
+.rk[aria-pressed=true] .lit{opacity:1}
+/* I 和 O：画出来的，不靠字体 */
+.mi,.mo{position:absolute;top:50%;left:var(--x);transform:translate(-50%,-50%) translateZ(.01em);pointer-events:none}
+.mi{--x:28%;width:.085em;height:.5em;background:var(--mk);border-radius:.02em}
+.mo{--x:72%;width:.42em;height:.42em;border-radius:50%;box-shadow:inset 0 0 0 .075em var(--mk)}
+.dot{display:none;position:absolute;left:14%;top:50%;width:.16em;height:.16em;margin:-.08em 0 0 -.08em;border-radius:50%;background:#d8332b;transform:translateZ(.01em)}
+.led{display:none;position:absolute;width:.2em;height:.2em;border-radius:50%;background:#2a2a2a;box-shadow:inset 0 .02em .03em rgba(0,0,0,.6);transition:background calc(var(--dur) * var(--slow)),box-shadow calc(var(--dur) * var(--slow))}
+.rk[aria-pressed=true] .led{background:#46e07f;box-shadow:0 0 .3em #46e07f,inset 0 -.02em .03em rgba(255,255,255,.5)}
+
+/* E2 红色透光 */
+.e2{--body:linear-gradient(#5b1712,#3a0d0a);--rc-sh:inset 0 .05em .03em rgba(255,255,255,.18);--glow:rgba(255,70,40,.55);--on-c:#ff5a3c;--neu:#3a0d0a}
+.e2 .lit,.e3 .lit{display:block}
+.e2 .lit{background:radial-gradient(120% 140% at 50% 45%,#ff7a52,#e8321f 55%,#a71a10);box-shadow:inset 0 .05em .03em rgba(255,255,255,.35)}
+.e2,.e3{--mk:rgba(255,255,255,.55)}
+/* E3 绿色透光 */
+.e3{--body:linear-gradient(#173f22,#0c2614);--rc-sh:inset 0 .05em .03em rgba(255,255,255,.18);--glow:rgba(70,230,120,.5);--on-c:#5df08e;--neu:#0c2614}
+.e3 .lit{background:radial-gradient(120% 140% at 50% 45%,#8dffb0,#2fcf63 55%,#167a36);box-shadow:inset 0 .05em .03em rgba(255,255,255,.35)}
+/* E4 电脑电源 */
+.e4{--frame:#161616;--body:#141414;--hole:#000;--fr-r:.12em;--hole-r:.06em;--rc-r:.05em;--hole-in:.16em;--rc-sh:none;--mk:#3a3a3a;--ang:13deg;--fr-sh:0 .04em .1em rgba(0,0,0,.6),inset 0 .03em 0 rgba(255,255,255,.07)}
+.e4 .mi,.e4 .mo{filter:drop-shadow(0 .02em 0 rgba(255,255,255,.08))}
+/* E5 圆形 */
+.e5{--fw:2.5em;--fh:2.5em;--fr-r:50%;--hole-r:50%;--rc-r:50%;--hole-in:.22em;--dep:.45em}
+.e5 .wl,.e5 .wr{top:.35em;bottom:.35em}
+.e5 .mi{--x:30%;height:.4em}.e5 .mo{--x:70%;width:.34em;height:.34em;box-shadow:inset 0 0 0 .065em var(--mk)}
+/* E6 白色家电 */
+.e6{--frame:linear-gradient(#fbfbf9,#e6e6e2);--hole:#9a9a95;--body:linear-gradient(#f2f2ef,#d9d9d4);--neu:#cfcfca;--rc-sh:inset 0 .05em .03em rgba(255,255,255,.9);--mk:#8b8b86;--fr-sh:0 .05em .14em rgba(0,0,0,.5)}
+.e6 .dot{display:block}
+/* E7 功放铝面板 */
+.e7{--frame:repeating-linear-gradient(90deg,rgba(255,255,255,.07) 0 .02em,transparent .02em .05em),linear-gradient(#d3d6da,#9ca1a7);--fr-r:.14em;--hole-r:.08em;--rc-r:.06em;--hole-in:.18em;
+  --body:linear-gradient(#2c2c2c,#080808);--rc-sh:inset 0 .05em .03em rgba(255,255,255,.22);--fr-sh:0 .05em .14em rgba(0,0,0,.5),inset 0 .03em 0 rgba(255,255,255,.6)}
+/* E8 仪器灰 */
+.e8{--fw:4.2em;--frame:linear-gradient(#d2d0c8,#b3b0a6);--hole:#2b2a27;--body:linear-gradient(#6a6964,#4a4945);--neu:#4a4945;--fr-r:.2em;--hole-r:.1em;--rc-r:.08em;--rc-sh:inset 0 .05em .03em rgba(255,255,255,.22);--ang:12deg;--fr-sh:0 .05em .14em rgba(0,0,0,.5),inset 0 .03em 0 rgba(255,255,255,.5)}
+.e8 .mi{--x:25%}.e8 .mo{--x:75%}
+/* E9 框上带指示灯 */
+.e9{--fw:4.1em}
+.e9 .hole{right:.72em}
+.e9 .led{display:block;right:.24em;top:50%;margin-top:-.1em}
+/* E10 双色跷板 */
+.e10{--body:linear-gradient(90deg,#1e7a43 0 50%,#a3241d 50%);--rc-sh:inset 0 .05em .03em rgba(255,255,255,.25);--mk:rgba(255,255,255,.85)}
+/* E11 带透明护盖 */
+.e11{--fh:2.2em}
+.e11 .cov{display:block}
+.cov{display:none;position:absolute;inset:-.08em -.08em auto;height:.55em;border-radius:.42em .42em .1em .1em;background:linear-gradient(rgba(255,255,255,.22),rgba(255,255,255,.06));box-shadow:inset 0 .03em 0 rgba(255,255,255,.4),0 .03em .05em rgba(0,0,0,.4);transform-origin:50% 0;pointer-events:none}
+</style>
+</head>
+<body data-ind="gr">
+<h1>设备电源开关 · 以 E 为底的 10 个</h1>
+<p class="sub">都是设备上的电源跷板：I 是开，O 是关，左按＝开。第一个是原来的 E，放在最前面做对照。I 和 O 是画出来的，不靠字体，粗细和位置都一致。</p>
+
+<div class="bar">
+  <span class="lab">侧壁指示色</span>
+  <span class="seg" id="ind">
+    <button data-v="gr" class="on">开绿 · 关红</button>
+    <button data-v="g">只在开时露绿</button>
+    <button data-v="r">开红</button>
+  </span>
+  <span class="lab">速度</span>
+  <span class="seg" id="slow"><button data-v="1" class="on">正常</button><button data-v="5">慢放 ×5</button></span>
+  <span class="lab">声音</span>
+  <span class="seg" id="snd"><button data-v="0" class="on">关</button><button data-v="1">咔哒声</button></span>
+  <button class="btn" id="all">全部切换</button>
+</div>
+
+<div class="grid" id="grid"></div>
+
+<script>
+const V = [
+  ['e1','E 原版','第一版的黑色 I/O 船型开关，做对照。', 1],
+  ['e2','红色透光','插线板、取暖器上那种：半透明红跷板，开了里面亮红灯。'],
+  ['e3','绿色透光','同上，亮绿灯。'],
+  ['e4','电脑电源','机箱电源背后那个：哑光黑、直角，I/O 是压出来的暗纹。'],
+  ['e5','圆形','圆孔里装的跷板，小家电上常见。'],
+  ['e6','白色家电','饮水机、电饭煲那种：白壳灰跷板，开的一侧点一个红点。'],
+  ['e7','功放铝面板','音响功放前面：拉丝铝面板，亮黑跷板，白色 I/O。'],
+  ['e8','仪器灰','示波器、电源柜那种：灰色机壳，大一号的深灰跷板。'],
+  ['e9','框上带指示灯','黑跷板旁边嵌一颗小灯，开了亮绿。'],
+  ['e10','双色跷板','I 那一半是绿，O 那一半是红，按下去哪一半一看就知道。'],
+  ['e11','带护盖','工业设备上防误碰的透明护盖，挡在开关上沿。'],
+];
+const inner = () => `<span class="fr"><span class="hole"><span class="rc"><i class="wl"></i><i class="wr"></i><i class="lit"></i><i class="fc"></i><i class="fc2"></i><i class="mi"></i><i class="mo"></i><i class="dot"></i></span></span><i class="led"></i><i class="cov"></i></span>`;
+const sw = (v, on, label) => `<button type="button" class="rk ${v}" aria-pressed="${on}" aria-label="${label}">${inner()}</button>`;
+document.getElementById('grid').innerHTML = V.map(([v, n, d, ref], i) => `<div class="card${ref ? ' ref' : ''}"><h2><b>${v.toUpperCase()}</b>${n}</h2><p>${d}</p><div class="stage">${sw(v, i % 2 === 0, n)}</div><div class="pop"><div class="row"><span>联网</span>${sw(v, true, '联网')}</div><div class="row"><span>思考</span>${sw(v, false, '思考')}</div></div><div class="cap">实际大小</div></div>`).join('');
+
+let ac = null, sound = false;
+function click() {
+  if (!sound) return;
+  ac = ac || new AudioContext();
+  const t = ac.currentTime, sr = ac.sampleRate;
+  [[0, 2600, .5], [.022, 1400, .28]].forEach(([dt, f, g]) => {
+    const n = Math.floor(sr * .012), b = ac.createBuffer(1, n, sr), d = b.getChannelData(0);
+    for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / n, 4);
+    const s = ac.createBufferSource(); s.buffer = b;
+    const bp = ac.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = f; bp.Q.value = 1.6;
+    const gn = ac.createGain(); gn.gain.value = g;
+    s.connect(bp).connect(gn).connect(ac.destination); s.start(t + dt);
+  });
+}
+document.addEventListener('click', (e) => {
+  const r = e.target.closest('.rk'); if (r) { r.setAttribute('aria-pressed', r.getAttribute('aria-pressed') !== 'true'); click(); return; }
+  const b = e.target.closest('.seg button'); if (b) {
+    b.parentNode.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
+    const id = b.parentNode.id;
+    if (id === 'ind') document.body.dataset.ind = b.dataset.v;
+    else if (id === 'slow') document.documentElement.style.setProperty('--slow', b.dataset.v);
+    else { sound = b.dataset.v === '1'; click(); }
+  }
+  if (e.target.id === 'all') { document.querySelectorAll('.stage .rk').forEach((x) => x.setAttribute('aria-pressed', x.getAttribute('aria-pressed') !== 'true')); click(); }
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,25 @@
+<!doctype html><meta charset="utf-8"><title>现有形状预览</title>
+<style>
+body{background:#17171a;color:#9a9aa2;font:14px "Microsoft YaHei",sans-serif;margin:0;padding:36px;display:grid;grid-template-columns:repeat(3,200px);gap:40px 36px}
+.c h3{color:#e2e2e5;font-weight:500;margin:0 0 4px;font-size:15px}.c p{margin:0 0 10px;font-size:12px;line-height:1.55;height:40px}
+.big{width:200px;height:200px}.sm{display:flex;align-items:center;gap:8px;margin-top:8px}.sm i{width:28px;height:28px;display:block}
+svg{width:100%;height:100%;display:block;overflow:visible}circle{fill:#e5484d}
+</style>
+<svg width="0" height="0" style="position:absolute"><defs>
+<filter id="goo" x="-30%" y="-30%" width="160%" height="160%" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="1.15"/><feColorMatrix values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 19 -8"/></filter>
+</defs></svg>
+<div id="g" style="display:contents"></div>
+<script>
+const sph=[];for(let k=0;k<8;k++){const y=1-2*(k+.5)/8,r=Math.sqrt(1-y*y),a=k*2.399963;sph.push([r*Math.cos(a),y,r*Math.sin(a)])}
+const SH=[
+ ['1 立方体','8 个顶点，不动',()=>sph.map((_,k)=>[k&1?.58:-.58,k&2?.58:-.58,k&4?.58:-.58])],
+ ['2 晶格','和立方体同样的位置，原子在原位热振动',t=>sph.map((_,k)=>[(k&1?.58:-.58)+.07*Math.sin(t*9+k*1.7),(k&2?.58:-.58)+.07*Math.sin(t*8+k*2.3),(k&4?.58:-.58)+.07*Math.sin(t*10+k*.9)])],
+ ['3 三叶结','数学里最简单的纽结，8 个球沿着它追',t=>sph.map((_,k)=>{const u=k*Math.PI/4+t*.6;return[(Math.sin(u)+2*Math.sin(2*u))/3.1,(Math.cos(u)-2*Math.cos(2*u))/3.1,-Math.sin(3*u)/1.6]})]
+];
+const els=[],g=document.getElementById('g');
+SH.forEach(([n,d,f])=>{const c=document.createElement('div');c.className='c';c.innerHTML='<h3>'+n+'</h3><p>'+d+'</p><div class="big"></div><div class="sm"><i></i><span>正在思考</span></div>';g.appendChild(c);
+ [c.querySelector('.big'),c.querySelector('.sm i')].forEach(b=>{b.innerHTML='<svg viewBox="0 0 24 24"><g filter="url(#goo)">'+'<circle r="1.95"/>'.repeat(8)+'</g></svg>';els.push([b,f])})});
+const t0=performance.now();
+(function f(now){requestAnimationFrame(f);const t=(now-t0)/1000,A=t*1.5,B=.5,cA=Math.cos(A),sA=Math.sin(A),cB=Math.cos(B),sB=Math.sin(B);
+ els.forEach(([b,fn])=>{const P=fn(t),cs=b.querySelectorAll('circle');P.forEach(([x,y,z],i)=>{const x1=x*cA+z*sA,z1=-x*sA+z*cA,y1=y*cB-z1*sB,z2=y*sB+z1*cB,c=cs[i];c.setAttribute('cx',12+x1*8.8);c.setAttribute('cy',12+y1*8.8);c.setAttribute('r',(1.95+.6*z2).toFixed(2))})})})(performance.now());
+</script>

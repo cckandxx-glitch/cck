@@ -1,0 +1,5 @@
+FROM D:/ai网站/本地AI/models/Qwen3.6-27B-UD-Q4_K_XL.gguf
+FROM D:/ai网站/本地AI/models/mmproj-F16.gguf
+PARAMETER num_ctx 32768
+PARAMETER use_mmap false
+PARAMETER temperature 0.6

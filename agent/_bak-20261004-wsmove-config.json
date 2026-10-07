@@ -1,0 +1,15 @@
+{
+  "model": "reize-qwen",
+  "ollama": "http://127.0.0.1:11434",
+  "workspace": "D:/ai网站/本地AI/工作区",
+  "kbDir": "D:/ai网站/本地AI/知识库",
+  "crmDir": "D:/ai网站/CRM",
+  "keysFile": "D:/ai网站/CRM/ai.secret",
+  "online": false,
+  "think": false,
+  "numCtx": 32768,
+  "maxSteps": 60,
+  "proxy": "",
+  "proxyFallback": "http://127.0.0.1:10808",
+  "port": 5200
+}

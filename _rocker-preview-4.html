@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>E 开关立体感</title>
+<style>
+:root{
+  --bg:#212121; --side:#282828; --pill:#2c2c2c; --line:rgba(255,255,255,.08);
+  --ink:#fff; --ink2:#e2e2e5; --mute:#97979e;
+  --font:"Inter","PingFang SC","Microsoft YaHei",sans-serif;
+  --slow:1;
+  --noise:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 .12 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+body{margin:0;background:var(--bg);color:var(--ink2);font:14px/1.5 var(--font);padding:24px 16px 60px}
+h1{font-size:22px;color:var(--ink);margin:0 0 4px;font-weight:600}
+.sub{color:var(--mute);margin:0 0 18px;font-size:13px;max-width:900px}
+.bar{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;margin-bottom:22px;position:sticky;top:0;background:var(--bg);padding:10px 0;z-index:5;border-bottom:1px solid var(--line)}
+.seg{display:inline-flex;background:var(--pill);border-radius:8px;padding:2px}
+.seg button{border:0;background:none;color:var(--mute);font:inherit;font-size:13px;padding:5px 10px;border-radius:6px;cursor:pointer}
+.seg button.on{background:rgba(255,255,255,.12);color:var(--ink)}
+.lab{color:var(--mute);font-size:13px}
+.btn{border:0;background:rgba(255,255,255,.07);color:var(--ink2);font:inherit;font-size:13px;height:30px;padding:0 12px;border-radius:8px;cursor:pointer}
+.btn:hover{background:rgba(255,255,255,.12);color:var(--ink)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}
+.card{background:var(--side);border-radius:12px;padding:16px 16px 14px;display:flex;flex-direction:column}
+.card.ref{outline:1px dashed rgba(255,255,255,.18)}
+.card h2{margin:0;font-size:15px;color:var(--ink);font-weight:600}
+.card h2 b{display:inline-block;width:30px;color:var(--mute);font-weight:600}
+.card p{margin:4px 0 0 30px;color:var(--mute);font-size:12.5px;min-height:56px}
+.stage{height:160px;display:flex;align-items:center;justify-content:center}
+.stage .rk{--fs:38px}
+/* 仿本地 AI 齿轮菜单 */
+.pop{background:#343436;border-radius:12px;padding:8px;display:flex;flex-direction:column;gap:6px;width:184px;align-self:center;box-shadow:0 12px 32px rgba(0,0,0,.55)}
+.row{display:flex;align-items:center;justify-content:space-between;height:34px;padding:0 9px 0 12px;border-radius:8px;background:rgba(255,255,255,.07);color:var(--ink2);font-size:13.5px}
+.row .rk{--fs:10.5px}
+.row.dim{color:var(--mute);font-size:13px}
+.row.dim i{width:7px;height:7px;border-radius:50%;background:#8bd5a8;margin-right:7px;display:inline-block}
+.cap{color:var(--mute);font-size:12px;text-align:center;margin-top:6px}
+
+/* ===== E 原版结构 ===== */
+.rk{
+  --on-c:#3dae6a; --off-c:#d84a4a; --neu:#222;
+  --frame:linear-gradient(#262626,#141414); --hole:#000; --body:linear-gradient(#262626,#0e0e0e); --crease:linear-gradient(transparent,transparent);
+  --ang:15deg; --dur:170ms; --ease:cubic-bezier(.4,0,.2,1);
+  --fr-r:.42em; --hole-r:.3em; --rc-r:.22em; --dep:.6em;
+  --fr-sh:0 .05em .14em rgba(0,0,0,.45); --hole-sh:inset 0 .05em .12em rgba(0,0,0,.5);
+  --rc-sh:inset 0 .05em .03em rgba(255,255,255,.16);
+  --mk:rgba(255,255,255,.72); --pz:0em;
+  font-size:var(--fs,10px);background:none;border:0;padding:0;margin:0;cursor:pointer;display:inline-block;line-height:0;-webkit-tap-highlight-color:transparent
+}
+.rk:focus-visible{outline:2px solid #8ab4ff;outline-offset:.15em;border-radius:var(--fr-r)}
+.rk:active{--pz:-.1em}
+body[data-ind=g] .rk{--off-c:var(--neu)}
+body[data-ind=r] .rk{--on-c:#d84a4a;--off-c:var(--neu)}
+.fr{position:relative;display:block;width:3.6em;height:2em;border-radius:var(--fr-r);background:var(--noise),var(--frame);box-shadow:var(--fr-sh)}
+.hole{position:absolute;inset:.2em;border-radius:var(--hole-r);background:var(--hole);perspective:12em;box-shadow:var(--hole-sh)}
+.rc{position:absolute;inset:.07em;border-radius:var(--rc-r);background:var(--noise),var(--crease),var(--body);box-shadow:var(--rc-sh);
+  transform-style:preserve-3d;transform:translateZ(var(--pz)) rotateY(var(--ang));
+  transition:transform calc(var(--dur) * var(--slow)) var(--ease)}
+.rk[aria-pressed=true] .rc{transform:translateZ(var(--pz)) rotateY(calc(var(--ang) * -1))}
+.wl,.wr{position:absolute;top:.04em;bottom:.04em;width:var(--dep);transition:opacity calc(var(--dur) * var(--slow) * .6) linear}
+.wr{right:0;transform-origin:100% 50%;transform:rotateY(-110deg);background:var(--on-c);opacity:0}
+.wl{left:0;transform-origin:0 50%;transform:rotateY(110deg);background:var(--off-c)}
+.rk[aria-pressed=true] .wr{opacity:1}.rk[aria-pressed=true] .wl{opacity:0}
+.fc,.fc2,.sp{position:absolute;inset:0;border-radius:inherit;transform:translateZ(.005em);transition:opacity calc(var(--dur) * var(--slow)) var(--ease);pointer-events:none}
+.fc{background:linear-gradient(90deg,rgba(255,255,255,.2),rgba(255,255,255,0) 48%,rgba(0,0,0,.16))}
+.fc2{background:linear-gradient(270deg,rgba(255,255,255,.2),rgba(255,255,255,0) 48%,rgba(0,0,0,.16));opacity:0}
+.rk[aria-pressed=true] .fc{opacity:0}.rk[aria-pressed=true] .fc2{opacity:1}
+.sp{display:none}
+.mi,.mo{position:absolute;top:50%;left:var(--x);transform:translate(-50%,-50%) translateZ(.01em);pointer-events:none}
+.mi{--x:28%;width:.085em;height:.5em;background:var(--mk);border-radius:.02em}
+.mo{--x:72%;width:.42em;height:.42em;border-radius:50%;box-shadow:inset 0 0 0 .075em var(--mk)}
+
+/* L1 深框：斜边框 + 深孔 + 落地阴影 */
+.l1,.l2,.l3,.l4{
+  --frame:linear-gradient(#323232,#161616 55%,#0e0e0e);
+  --fr-sh:0 .1em .22em rgba(0,0,0,.65),0 .02em .03em rgba(0,0,0,.9),inset 0 .04em 0 rgba(255,255,255,.16),inset 0 -.04em .02em rgba(0,0,0,.7),inset .04em 0 .03em rgba(255,255,255,.04),inset -.04em 0 .03em rgba(0,0,0,.4);
+  --hole-sh:inset 0 .12em .22em rgba(0,0,0,.95),inset 0 -.035em .02em rgba(255,255,255,.07)}
+/* L2 + 中线折痕 + 随倾斜滑动的高光 */
+.l2,.l3,.l4{--crease:linear-gradient(90deg,transparent 47%,rgba(0,0,0,.45) 50%,rgba(255,255,255,.06) 51.5%,transparent 54%)}
+.l2 .sp,.l3 .sp,.l4 .sp{display:block;transform:translateZ(.008em);
+  background:linear-gradient(100deg,transparent 30%,rgba(255,255,255,.16) 44%,rgba(255,255,255,.04) 52%,transparent 62%);background-size:260% 100%;background-position:100% 0;
+  transition:background-position calc(var(--dur) * var(--slow)) var(--ease)}
+.l2[aria-pressed=true] .sp,.l3[aria-pressed=true] .sp,.l4[aria-pressed=true] .sp{background-position:0 0}
+/* L3 + 倾角加大到 19°，跷板浮起有投影 */
+.l3,.l4{--ang:19deg;--rc-sh:inset 0 .05em .03em rgba(255,255,255,.2),0 .05em .08em rgba(0,0,0,.7)}
+/* L4 + 机身厚度：外框和跷板都露出下沿 */
+.l4{--fr-sh:0 .11em 0 #050505,0 .11em 0 .01em rgba(255,255,255,.05),0 .2em .26em rgba(0,0,0,.6),inset 0 .04em 0 rgba(255,255,255,.18),inset 0 -.03em .02em rgba(0,0,0,.6);
+  --rc-sh:inset 0 .05em .03em rgba(255,255,255,.22),inset 0 -.07em 0 rgba(0,0,0,.55),0 .05em .08em rgba(0,0,0,.7)}
+.l4 .fr{margin-bottom:.11em}
+.l4:active .fr{transform:translateY(.03em)}
+</style>
+</head>
+<body data-ind="gr">
+<h1>E 的立体感 · 四档</h1>
+<p class="sub">从原版往上一档一档加：每一档都包含前一档。下面那块是本地 AI 齿轮菜单的样子：最上面「AI OFF / AI ON」按钮换成这个开关，按左＝开 AI。</p>
+
+<div class="bar">
+  <span class="lab">侧壁指示色</span>
+  <span class="seg" id="ind">
+    <button data-v="gr" class="on">开绿 · 关红</button>
+    <button data-v="g">只在开时露绿</button>
+    <button data-v="r">开红</button>
+  </span>
+  <span class="lab">速度</span>
+  <span class="seg" id="slow"><button data-v="1" class="on">正常</button><button data-v="5">慢放 ×5</button></span>
+  <span class="lab">声音</span>
+  <span class="seg" id="snd"><button data-v="0" class="on">关</button><button data-v="1">咔哒声</button></span>
+  <button class="btn" id="all">全部切换</button>
+</div>
+
+<div class="grid" id="grid"></div>
+
+<script>
+const V = [
+  ['l0','E 原版','对照。', 1],
+  ['l1','深框','外框做成斜边：上沿亮、下沿暗；孔挖得更深；整个开关在菜单上投下一块阴影。'],
+  ['l2','＋折痕和高光','跷板中间一道折痕，像两个斜面；一条反光随着倾斜从一头滑到另一头。'],
+  ['l3','＋大倾角和浮起','倾角从 15° 加到 19°，翘得更明显；跷板在孔里投下阴影，看着是浮起来的。'],
+  ['l4','＋机身厚度','外框和跷板都露出下沿，像有实打实的厚度；按住时整个往下沉一点。'],
+];
+const inner = () => `<span class="fr"><span class="hole"><span class="rc"><i class="wl"></i><i class="wr"></i><i class="fc"></i><i class="fc2"></i><i class="sp"></i><i class="mi"></i><i class="mo"></i></span></span></span>`;
+const sw = (v, on, label) => `<button type="button" class="rk ${v}" aria-pressed="${on}" aria-label="${label}">${inner()}</button>`;
+document.getElementById('grid').innerHTML = V.map(([v, n, d, ref], i) => `<div class="card${ref ? ' ref' : ''}"><h2><b>${v.toUpperCase()}</b>${n}</h2><p>${d}</p><div class="stage">${sw(v, i % 2 === 1, n)}</div><div class="pop"><div class="row"><span>AI</span>${sw(v, true, 'AI 电源')}</div><div class="row dim"><span><i></i>联网：开</span></div><div class="row dim"><span>思考：关</span></div></div><div class="cap">实际大小（齿轮菜单）</div></div>`).join('');
+
+let ac = null, sound = false;
+function click() {
+  if (!sound) return;
+  ac = ac || new AudioContext();
+  const t = ac.currentTime, sr = ac.sampleRate;
+  [[0, 2600, .5], [.022, 1400, .28]].forEach(([dt, f, g]) => {
+    const n = Math.floor(sr * .012), b = ac.createBuffer(1, n, sr), d = b.getChannelData(0);
+    for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / n, 4);
+    const s = ac.createBufferSource(); s.buffer = b;
+    const bp = ac.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = f; bp.Q.value = 1.6;
+    const gn = ac.createGain(); gn.gain.value = g;
+    s.connect(bp).connect(gn).connect(ac.destination); s.start(t + dt);
+  });
+}
+document.addEventListener('click', (e) => {
+  const r = e.target.closest('.rk'); if (r) { r.setAttribute('aria-pressed', r.getAttribute('aria-pressed') !== 'true'); click(); return; }
+  const b = e.target.closest('.seg button'); if (b) {
+    b.parentNode.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
+    const id = b.parentNode.id;
+    if (id === 'ind') document.body.dataset.ind = b.dataset.v;
+    else if (id === 'slow') document.documentElement.style.setProperty('--slow', b.dataset.v);
+    else { sound = b.dataset.v === '1'; click(); }
+  }
+  if (e.target.id === 'all') { document.querySelectorAll('.stage .rk').forEach((x) => x.setAttribute('aria-pressed', x.getAttribute('aria-pressed') !== 'true')); click(); }
+});
+</script>
+</body>
+</html>
