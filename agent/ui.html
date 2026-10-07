@@ -202,16 +202,16 @@ textarea{width:100%;padding:10px 12px;border:1px solid var(--line2);border-radiu
 #wk>span{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}   /* 顺序：已 xx 秒 · 硬件数据 · 正在干什么。长短会变的文字放最后，怎么变都推不动前面的东西 */
 #wk em .gauge{display:inline-flex;align-items:center;padding:4px 1px;margin:-4px 0}
 /* 10-07 用户定的圆环：外径 14px（10-07 用户：先放大到 16 又定回 14）、线宽约 2px，按屏幕真实像素取整来画（见 gaugeSvg / gaugeSnap），不发毛。
-   显卡段：从正下方往左、过顶、到右边，占整圈 70%。空闲时整段灰；开始工作就有一段红从起点往上爬，爬到哪 = 占用多少。
-   内存段：固定在右下角 30%，灰白色（比显卡空闲的灰亮），不表示百分比，只有两种状态：正常灰白，快满了整段变黄。整圈连着、不留缝（10-07 用户：断开不清晰）。 */
+   显卡：占整圈，从正下方往左、过顶、绕回正下方（12 点起步的是侧边栏「上下文快满」，两个错开，10-07 用户定）。空闲时整圈暗灰；开始工作就有一段红从起点爬，爬到哪 = 占用多少，满载正好一整圈。
+   内存：平时不显示（10-07 用户：平时几乎不会满，不用额外占位置）。快满了（≥90%，<85% 才恢复）整圈变黄、红段隐去——这时机器已经在往硬盘倒腾、明显变卡，该停下模型查原因，显卡占多少已经不重要。具体数字鼠标放上去看。 */
 #wk em .gauge svg{display:block;overflow:visible}   /* 大小由脚本按屏幕缩放算好写在元素上（见 gaugeSvg） */
 #wk em .gauge path,#wk em .gauge circle{fill:none;stroke-linecap:butt}   /* 线宽由脚本按真实像素算（见 gaugeSvg） */
-#wk em .gauge .gt{stroke:rgba(255,255,255,.2)}   /* 底：一整圈一笔画完（显卡空闲时的灰），内存段和红段都叠在它上面，段与段交界处不会透出暗缝 */
-#wk em .gauge .gv{stroke:#e5484d;stroke-dasharray:100 200;transition:stroke-dashoffset .9s cubic-bezier(.33,1,.68,1)}   /* 显卡在工作的那段红：0.9 秒先快后慢滑到新位置（数据每 2 秒来一次，跟得上又不一顿一顿）；空隙留到 200，0% 时末端不漏亮点 */
-#wk em .gauge .mm{stroke:#929296;transition:stroke .6s ease}   /* 内存段：浅灰。10-07 用户：原来的灰白 #c4c4c9 看着比显卡段粗（几何线宽实测一样，是太亮显粗）；压到 #626266 又和显卡空闲的灰分不太清。用户定取中间值：屏幕上明度差 ΔL* 约 37（原来 51、压暗版 22） */
-#wk em .gauge .mm.warn{stroke:#f5a524}   /* 内存快满：整段变琥珀黄，0.6 秒渐变 */
-#wk em .gauge.still .gv,#wk em .gauge.still .mm{transition:none}   /* 刚建好、还原上次的样子时不播动画（切换对话不会每次从 0 重新长一遍） */
-@media (prefers-reduced-motion:reduce){#wk em .gauge .gv,#wk em .gauge .mm{transition:none}}
+#wk em .gauge .gt{stroke:rgba(255,255,255,.2);transition:stroke .6s ease}   /* 底：一整圈（显卡空闲时的暗灰），红段叠在它上面 */
+#wk em .gauge .gv{stroke:#e5484d;stroke-dasharray:101 202;transition:stroke-dashoffset .9s cubic-bezier(.33,1,.68,1),opacity .6s ease}   /* 显卡在工作的那段红：0.9 秒先快后慢滑到新位置（数据每 2 秒来一次，跟得上又不一顿一顿）；空隙留到 202，0% 时末端不漏亮点 */
+#wk em .gauge.memfull .gt{stroke:#f5a524}   /* 内存快满：整圈变琥珀黄，0.6 秒渐变 */
+#wk em .gauge.memfull .gv{opacity:0}
+#wk em .gauge.still .gv,#wk em .gauge.still .gt{transition:none}   /* 刚建好、还原上次的样子时不播动画（切换对话不会每次从 0 重新长一遍） */
+@media (prefers-reduced-motion:reduce){#wk em .gauge .gv,#wk em .gauge .gt{transition:none}}
 #wk>b{flex:none;text-align:right}   /* 宽度由脚本按「已 999 秒」定好；靠右对齐，后面的点紧挨着秒数 */
 #wk em{flex:none;display:inline-flex;align-items:center;font-style:normal;font-variant-numeric:tabular-nums;white-space:nowrap;opacity:.75}
 #wk em .hot{color:#e5484d}   /* 超过 85% 竖条变红 */
@@ -1126,15 +1126,15 @@ function wkSel() { const w = document.getElementById('wk'), s = getSelection(); 
 // 量一段字在 el 里的宽度（px）：临时换上字、读 scrollWidth、再换回来
 function wkMeasure(el, t) { const o = el.textContent; el.textContent = t; const w = el.scrollWidth; el.textContent = o; return w; }
 const gaugeLast = {};   // 圆环上次的样子（显卡红段画到哪、内存黄没黄）：这一行被重建时接着显示，不从 0 重来
-// 圆环是一整圈、不断开（位置按「从正下方顺时针走一圈 = 100」算）：显卡 0→70，内存 70→100（右下角 30%）
+// 圆环是一整圈（位置按「从正下方顺时针走一圈 = 100」算）：整圈都是显卡；内存快满时整圈变黄
 // 按屏幕的真实像素来画（10-07 用户：线有毛躁感）：Windows 常开 125%/150% 缩放，按网页尺寸画时线宽是 2.5 这类半个像素、边缘落在两格像素之间，看着发毛。
 // 所以按当前缩放算出整数个真实像素的画布、线宽和外沿半径，圆心落在像素交界上，上下左右四个外沿都正好压在像素格线上
 function gaugeSvg() {
   const k = devicePixelRatio || 1, vb = 2 * Math.ceil(8 * k), c = vb / 2, w = Math.max(2, Math.round(2 * k)), r = Math.round(7 * k) - w / 2;
   const p = (q) => (c - r * Math.sin(q / 50 * Math.PI)).toFixed(3) + ' ' + (c + r * Math.cos(q / 50 * Math.PI)).toFixed(3);
   const arc = (q0, q1) => `M${p(q0)}A${r} ${r} 0 ${q1 - q0 > 50 ? 1 : 0} 1 ${p(q1)}`;
-  // 内存段两头各多画 0.7（约 0.3 像素）压到红段底下：红段从正下方起笔、满载时一直走到 70，两段平头碰头的地方各只盖住半个像素，会透出底下的暗灰、看着缺一口（10-07 用户截图）。红段画在最上面，多出来的那点被它盖住
-  return `<svg viewBox="0 0 ${vb} ${vb}" stroke-width="${w}" style="width:${vb / k}px;height:${vb / k}px" role="img"><circle class="gt" cx="${c}" cy="${c}" r="${r}"/><path class="mm" d="${arc(69.3, 100.7)}"/><path class="gv" d="${arc(0, 70)}" pathLength="100" style="stroke-dashoffset:100"/></svg>`;
+  // 红段的路径多绕 1（0→101）、按 101 份算长度：满载时末端压过起笔处一点，首尾两个平头不会在正下方碰出一道暗缝；其余时候只画 0→占用
+  return `<svg viewBox="0 0 ${vb} ${vb}" stroke-width="${w}" style="width:${vb / k}px;height:${vb / k}px" role="img"><circle class="gt" cx="${c}" cy="${c}" r="${r}"/><path class="gv" d="${arc(0, 50)}${arc(50, 101).replace(/^M[^A]*/, '')}" pathLength="101" style="stroke-dashoffset:101"/></svg>`;
 }
 // 圆环的上下位置：对准后面那行汉字笔画的真实中心（10-07 用户：看着偏下）。按行框居中不准——微软雅黑这类中文字体的字形在行框里偏上，
 // 所以用画布量出当前字体里「学」的笔画上下边，算出笔画中心在这一行里的位置，把圆环中心挪过去；最后再对齐到整像素，免得发毛
@@ -1161,26 +1161,26 @@ function gpuPaint() {
   const em = document.querySelector('#wk em'); if (!em || wkSel()) return;
   if (em.firstChild && em._k !== devicePixelRatio) em.innerHTML = '';   // 换了屏幕缩放（拖到另一个显示器、Ctrl+滚轮）：按新的像素重画，样子从上次接着来
   if (!em.firstChild) { em.innerHTML = '<span class="gauge">' + gaugeSvg() + '</span>'; em._k = devicePixelRatio; }
-  const ga = em.querySelector('.gauge'), gv = ga.querySelector('.gv'), mm = ga.querySelector('.mm'), d = gpuD || {}, f1 = (v) => Number(v).toFixed(1), tips = [];
+  const ga = em.querySelector('.gauge'), gv = ga.querySelector('.gv'), d = gpuD || {}, f1 = (v) => Number(v).toFixed(1), tips = [];
   if (!ga._init) {   // 这一行刚建好：先不带动画摆回上次的样子；第一次打开界面则从 0 开始、下一帧再长到实际值
     ga._init = true;
-    if ('g' in gaugeLast) { ga.classList.add('still'); gv.style.strokeDashoffset = gaugeLast.g; mm.classList.toggle('warn', !!gaugeLast.m); ga.getBoundingClientRect(); requestAnimationFrame(() => requestAnimationFrame(() => ga.classList.remove('still'))); }
+    if ('g' in gaugeLast) { ga.classList.add('still'); gv.style.strokeDashoffset = gaugeLast.g; ga.classList.toggle('memfull', !!gaugeLast.m); ga.getBoundingClientRect(); requestAnimationFrame(() => requestAnimationFrame(() => ga.classList.remove('still'))); }
     else ga.getBoundingClientRect();
   }
-  ga.style.display = d.total || d.memTotal ? '' : 'none';   // 一项数据都没有时整个圆环不出现，不留一个空圈
-  gv.style.display = d.total ? '' : 'none'; mm.style.display = d.memTotal ? '' : 'none';
+  gv.style.display = d.total ? '' : 'none';
   if (d.total) {
     const u = Math.round(Math.max(0, Math.min(100, Number(d.util) || 0)));
     const busy = gaugeLast.busy ? u >= 10 : u >= 20;   // 20% 以上算开始工作（和提示里「运算中」同一个标准），降到 10% 以下才算空闲：在门槛附近抖时红段不会一闪一闪
     gaugeLast.busy = busy;
-    const o = String(busy ? 100 - u : 100); if (gv.style.strokeDashoffset !== o) gv.style.strokeDashoffset = o; gaugeLast.g = o;   // 空闲时红段缩回起点，整段只剩灰
+    const o = String(busy ? (u >= 100 ? 0 : 101 - u) : 101); if (gv.style.strokeDashoffset !== o) gv.style.strokeDashoffset = o; gaugeLast.g = o;   // 空闲时红段缩回起点，整段只剩灰
     tips.push(`显卡 ${d.util}%（${busy ? '运算中' : '空闲中'}，显存 ${f1(d.used)} / ${d.total} GB）`);
   }
   if (d.memTotal) {
     const mp = Math.round(d.memUsed / d.memTotal * 100);
-    const warn = mm.classList.contains('warn') ? mp >= 85 : mp >= 90; mm.classList.toggle('warn', warn); gaugeLast.m = warn;   // 90% 变黄（再高 Windows 就开始大量往硬盘倒腾、明显变卡），降到 85% 以下才变回灰白
+    const warn = ga.classList.contains('memfull') ? mp >= 85 : mp >= 90; ga.classList.toggle('memfull', warn); gaugeLast.m = warn;   // 90% 变黄（再高 Windows 就开始大量往硬盘倒腾、明显变卡），降到 85% 以下才恢复
     tips.push(`内存 ${mp}%${warn ? '（快满了）' : ''}，${f1(d.memUsed)} / ${f1(d.memTotal)} GB` + (d.virtTotal ? `，虚拟内存 ${f1(d.virtUsed)} / ${f1(d.virtTotal)} GB` : ''));
   }
+  ga.style.display = d.total || ga.classList.contains('memfull') ? '' : 'none';   // 没有显卡数据、内存也没满时整个圆环不出现，不留一个空圈
   if (tips.length) { const t = tips.join(' · '); wkTip(em, t); const sv = ga.querySelector('svg'); if (sv.getAttribute('aria-label') !== t) sv.setAttribute('aria-label', t); }   // 鼠标放在圆环上看具体数字
   gaugeSnap();
 }
