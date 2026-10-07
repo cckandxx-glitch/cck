@@ -31,11 +31,11 @@ const busyMsg = (what) => busyDoing() + '，现在不能' + what + '。等它做
 let unattended = false;
 let allowAll = false;   // 用户点了「本次任务全部同意」：这一轮里不再逐条问（删除和危险命令除外）
 const DANGER = /\b(Remove-Item|rm|rmdir|del|erase|format|diskpart|shutdown|Restart-Computer|Stop-Computer|reg(\.exe)?\s+(add|delete)|Set-ExecutionPolicy|net\s+user|schtasks|taskkill|Stop-Process|bcdedit|cipher)\b/i;
-const isRisky = (d) => !!d && (d.kind === 'delete' || (d.kind === 'command' && DANGER.test(String(d.command || ''))));
+const isRisky = (d) => !!d && (d.kind === 'batch' ? (d.items || []).some((x) => isRisky(x.detail)) : d.kind === 'delete' || (d.kind === 'command' && DANGER.test(String(d.command || ''))));
 const queue = { items: [], cancel: false };
 // ---------- 学习循环（2026-10-06 用户设定）：说"请学习/继续学"就一直跑，每轮学完自动开下一轮，只在聊天框汇报，不弹确认；说"停止学习"或点急停才停 ----------
 const learn = { on: false, round: 0, stopped: false };
-const LEARN_PROMPT = () => '（学习循环第 ' + (learn.round + 1) + ' 轮：本轮按自学计划深挖 1~2 个主题。本轮结束时，用简短的进度汇报收尾：学了哪些主题、结果存到哪个文件、下一轮准备学什么。不要问问题、不要等指示——下一轮会自动开始，直到用户说"停止学习"。）';
+const LEARN_PROMPT = () => '（学习第 ' + (learn.round + 1) + ' 轮：按自学计划学 1~2 个主题，存进知识库。最后只写一行：学了什么 → 存在哪 → 下一轮学什么。）';
 function stopLearn(reason) {
   if (!learn.on) return;
   learn.on = false; learn.stopped = true;
@@ -162,11 +162,12 @@ function onEvent(type, d) {
 
 function ask(q, detail) {
   if (learn.on) {            // 学习循环：不弹确认，直接自动同意（用户 2026-10-06：学习时不要让我点任何确认）
-    if (isRisky(detail)) { notice('学习循环中，跳过危险操作: ' + q.split('\n')[0]); return Promise.resolve(false); }   // 自动同意不打扰（2026-10-07 用户要求）
+    if (isRisky(detail)) { notice('学习循环中，跳过危险操作: ' + (detail.kind === 'batch' ? detail.items.filter((x) => isRisky(x.detail)).map((x) => x.q.split('\n')[0]).join('；') : q.split('\n')[0])); return Promise.resolve(false); }   // 自动同意不打扰（2026-10-07 用户要求）
     return Promise.resolve(true);
   }
   if (unattended) {          // 无人值守：只允许往 任务结果/草稿/线索 写文件，其余一律拒绝
-    const ok = detail.kind === 'write' && ['任务结果', '草稿', '线索'].some((d) => path.resolve(detail.path).startsWith(path.join(core.WS, d) + path.sep));
+    const okOne = (dt) => dt.kind === 'write' && ['任务结果', '草稿', '线索'].some((d) => path.resolve(dt.path).startsWith(path.join(core.WS, d) + path.sep));
+    const ok = detail.kind === 'batch' ? (detail.items || []).every((x) => okOne(x.detail)) : okOne(detail);
     if (!ok) notice('无人值守，已拒绝: ' + q);
     return Promise.resolve(ok);
   }
