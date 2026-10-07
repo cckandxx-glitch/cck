@@ -735,6 +735,14 @@ ${learnTodo()}
         }
       }
       if (!opts.sub && !opts.loop) emit('notice', { text: `已到最大步数（${cfg.maxSteps}）。` });
+      if (opts.loop) {   // 10-07 用户：每轮都要交代一句学了什么。步数用完时不再给工具，让它补写那一行汇报
+        checkStop();
+        messages.push({ role: 'user', content: '（本轮步数用完了。不要再调用工具，只用中文写一行：学了什么 → 存在哪 → 下一轮学什么。）' });
+        const { content } = await chatOnce(undefined, true);
+        messages.push({ role: 'assistant', content });
+        if (content.trim()) emit('token', { text: content });
+        emit('done', { stats: null }); return content;
+      }
     } catch (e) {
       if (opts.sub && (e.name === 'AbortError' || e.name === 'StopError')) throw e;
       if (e.name === 'AbortError' || e.name === 'StopError') { emit('stopped', {}); log('stop', {}); return lastText; }
