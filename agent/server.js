@@ -252,7 +252,11 @@ async function ensureOllama() {   // 助手开 Ollama 跟着开，助手关 Olla
   if (await ollamaUp()) return;
   try { execFileSync('taskkill', ['/f', '/im', 'llama-server.exe'], { stdio: 'ignore' }); } catch (e) {}   // Ollama 没在跑，这时还在的 llama-server 都是上次留下的孤儿
   // flash attention + 8 位 KV 缓存：同样显存装两倍上下文（10-05 实测 128K 整个在显卡里，160K 放不下）
-  try { spawn(OLLAMA_EXE, ['serve'], { stdio: 'ignore', windowsHide: true, env: { ...process.env, OLLAMA_FLASH_ATTENTION: '1', OLLAMA_KV_CACHE_TYPE: 'q8_0' } }).on('error', (e) => bbS('Ollama 启动失败', e)).unref(); } catch (e) {}   // 找不到 exe 时 spawn 会异步报 error，不接住整个后台就崩了
+  // Ollama 自己的日志写到 logs\ollama.log（以前直接丢掉，模型卡住时查不到原因）；超过 20MB 先改名成 .old
+  let olog = 'ignore';
+  try { const lf = path.join(__dirname, '..', 'logs', 'ollama.log'); fs.mkdirSync(path.dirname(lf), { recursive: true }); try { if (fs.statSync(lf).size > 20e6) fs.renameSync(lf, lf + '.old'); } catch (e) {} olog = fs.openSync(lf, 'a'); } catch (e) {}
+  try { spawn(OLLAMA_EXE, ['serve'], { stdio: ['ignore', olog, olog], windowsHide: true, env: { ...process.env, OLLAMA_FLASH_ATTENTION: '1', OLLAMA_KV_CACHE_TYPE: 'q8_0' } }).on('error', (e) => bbS('Ollama 启动失败', e)).unref(); } catch (e) {}
+  if (typeof olog === 'number') try { fs.closeSync(olog); } catch (e) {}   // 子进程有自己的一份句柄，这边关掉   // 找不到 exe 时 spawn 会异步报 error，不接住整个后台就崩了
   for (let i = 0; i < 40; i++) { if (await ollamaUp()) return; await new Promise((r) => setTimeout(r, 500)); }
   bbS('Ollama 20 秒内没起来，用的是', OLLAMA_EXE);
   notice('Ollama 启动不了，请手动打开。');

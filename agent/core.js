@@ -633,19 +633,19 @@ ${learnTodo()}
       break;
     }
     if (!r.ok) throw new Error('Ollama 返回 ' + r.status + ': ' + (await r.text()).slice(0, 200));
-    let content = '', calls = [], buf = '', thinking = false, stats = null; const dec = new TextDecoder();
+    let content = '', calls = [], buf = '', thinking = false, stats = null, thinkN = 0; const dec = new TextDecoder();
     for await (const chunk of r.body) {
       arm(120000); buf += dec.decode(chunk, { stream: true }); let i;
       while ((i = buf.indexOf('\n')) >= 0) {
         const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1); if (!line) continue;
         const j = JSON.parse(line), m = j.message || {};
-        if (m.thinking && !thinking) { thinking = true; emit('thinking', {}); }
+        if (m.thinking) { thinkN += m.thinking.length; if (!thinking) { thinking = true; emit('thinking', {}); } }
         if (m.content) { thinking = false; if (!quietTok) emit('token', { text: m.content }); content += m.content; if (quietTok && Date.now() - quietAt > 1500) { quietAt = Date.now(); emit('quiet', { n: content.length }); } }   // 学习时字不上屏，但要让界面知道模型还在写、写了多少，不然看着像卡住
         if (m.tool_calls) calls.push(...m.tool_calls);
         if (j.done) stats = j;
       }
     }
-    return { content, calls, stats };
+    return { content, calls, stats, thinkN };
   }
 
   // 这个工具调用执行时会不会弹确认；会的话返回确认框要显示的内容（和工具里自己问的保持一致）
@@ -703,10 +703,11 @@ ${learnTodo()}
       for (let step = 0; step < stepCap; step++) {
         checkStop(); trimHistory(); await compact(); checkStop();
         if (opts.loop) emit('step', { step: step + 1 });
-        const { content, calls, stats } = await chatOnce(undefined, denied);   // 用户拒绝过：这一轮不给工具，只许说话，不准换办法绕
+        log('llm', { step: step + 1, ctx: lastUsed || undefined });   // 每次调模型前记一笔：日志停在这里 = 卡在等模型（10-07 18:24 之后 21 分钟没日志，分不清卡在哪）
+        const { content, calls, stats, thinkN } = await chatOnce(undefined, denied);   // 用户拒绝过：这一轮不给工具，只许说话，不准换办法绕
         if (stats && stats.prompt_eval_count) lastUsed = stats.prompt_eval_count + (stats.eval_count || 0);
         messages.push({ role: 'assistant', content, ...(calls.length && !denied ? { tool_calls: calls } : {}) });
-        log('assistant', { text: content, calls: calls.map((c) => c.function) });
+        log('assistant', { text: content, calls: calls.map((c) => c.function), ...(thinkN ? { thinkChars: thinkN } : {}) });
         if (quietTok && content.trim() && !(calls.length && !denied)) emit('token', { text: reportLine(content, opts) });   // 学习：没有工具调用的这条才是汇报，补上屏
         if (content) lastText = content;
         if (denied || !calls.length) { if (!opts.sub) lastText = applyLinkFixes(lastText); emit('done', { stats: stats ? { n: stats.eval_count, tps: stats.eval_count / (stats.eval_duration / 1e9) } : null }); return lastText; }
@@ -767,7 +768,7 @@ ${learnTodo()}
 
   // 一次性提问（不带工具、不进对话历史），给线索挖掘等流水线用
   async function oneShot(prompt, { json = false, system = '', maxTokens = 600 } = {}) {
-    const r = await fetch(cfg.ollama + '/api/chat', { method: 'POST', body: JSON.stringify({ model: cfg.model, stream: false, think: false, keep_alive: -1, ...(json ? { format: 'json' } : {}), messages: [...(system ? [{ role: 'system', content: system }] : []), { role: 'user', content: prompt }], options: { num_ctx: ctxN(), num_predict: maxTokens, temperature: 0.2 } }) });
+    const r = await fetch(cfg.ollama + '/api/chat', { method: 'POST', signal: AbortSignal.timeout(300000), body: JSON.stringify({ model: cfg.model, stream: false, think: false, keep_alive: -1, ...(json ? { format: 'json' } : {}), messages: [...(system ? [{ role: 'system', content: system }] : []), { role: 'user', content: prompt }], options: { num_ctx: ctxN(), num_predict: maxTokens, temperature: 0.2 } }) });
     if (!r.ok) throw new Error('Ollama 返回 ' + r.status);
     return (await r.json()).message.content || '';
   }
