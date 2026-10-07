@@ -756,7 +756,7 @@ function paintConvs() {
 }
 async function convCall(p, id) { try { await api('/api/conv/' + p, { id }); } catch (e) { uiAlert(e.message); return false; } await refresh(); return true; }
 async function newConv() { showPage('chat'); if (!(await convCall('new'))) return; $('#inp').focus(); }
-async function openConv(id) { if (page === 'chat' && id === S.cur) return; showPage('chat'); await convCall('open', id); }
+async function openConv(id) { if (id === S.cur) { if (page !== 'chat') showPage('chat'); return; } showPage('chat'); await convCall('open', id); }   // 点的就是当前对话（比如从文件页回来）只切页面，不打后端，忙的时候也不会被挡
 async function delConv(c) { if (!(await uiConfirm('删除对话「' + (c.title || '新对话') + '」？删除后不能恢复。', true))) return; await convCall('delete', c.id); }
 function loadChat() {
   chat.innerHTML = ''; $('#actT').textContent = ''; window.__loadingChat = true; (S.tr || []).forEach(add); window.__loadingChat = false;
