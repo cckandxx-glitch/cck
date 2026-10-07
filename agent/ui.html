@@ -199,7 +199,8 @@ textarea{width:100%;padding:10px 12px;border:1px solid var(--line2);border-radiu
 @media (prefers-reduced-motion:reduce){#wk>span{animation:none}}
 #wk b{font-weight:400;font-variant-numeric:tabular-nums}
 #wk>span::selection{-webkit-text-fill-color:var(--ink)}   /* 文字本身是透明渐变，选中时显示成正常字色 */
-#wk>span{flex:none;width:17em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}   /* 文字长短不一：这一段定宽，后面的秒数和硬件数据就不会跟着前后伸缩 */
+#wk>span{flex:none;max-width:30em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}   /* 文字长短不一：这一段的宽度由脚本按这类活可能出现的最长文字定好，后面的秒数和硬件数据就不会跟着前后伸缩 */
+#wk em .c{display:inline-block}   /* 硬件数据分栏：每栏按最宽的数字定宽，数字变化时后面的栏不动 */
 #wk>b{flex:none;min-width:4.6em;text-align:right}   /* 「已 9 秒」到「已 999 秒」宽度不变；靠右对齐，多出的空白落在前面文字那段的空白里，后面的点紧挨着秒数 */
 #wk em{font-style:normal;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;opacity:.75}
 #wk:not(.idle) em{margin-left:-4px}
@@ -1107,28 +1108,44 @@ async function send() {
 let gpuD = null;
 // 这一行只改有变化的字、不重建元素：重建会把你选中的字冲掉，鼠标提示也会变成系统自带的白框
 const wkTxt = (e, t) => { if (e.textContent !== t) e.textContent = t; };
-const wkTip = (e, t) => { if (e.dataset.tip != null) e.dataset.tip = t; else if (e.getAttribute('title') !== t) e.setAttribute('title', t); };   // 鼠标正停在上面时提示存在 data-tip 里
+const wkTip = (e, t) => { if (e.dataset.tip != null) { if (e.dataset.tip !== t) { e.dataset.tip = t; const tp = document.getElementById('tip'); if (tp && tp.classList.contains('on')) tp.textContent = t; } } else if (e.getAttribute('title') !== t) e.setAttribute('title', t); };   // 鼠标正停在上面时提示存在 data-tip 里
 let wkDown = false;
 document.addEventListener('mousedown', (e) => { wkDown = !!(e.target.closest && e.target.closest('#wk')); }, true);
 document.addEventListener('mouseup', () => { wkDown = false; }, true);
 function wkSel() { const w = document.getElementById('wk'), s = getSelection(); return !!w && (wkDown || (s.rangeCount > 0 && !s.isCollapsed && (w.contains(s.anchorNode) || w.contains(s.focusNode)))); }   // 正在选这一行的字：先别刷新
+// 量一段字在 el 里的宽度（px）：临时换上字、读 scrollWidth、再换回来
+function wkMeasure(el, t) { const o = el.textContent; el.textContent = t; const w = el.scrollWidth; el.textContent = o; return w; }
 function gpuPaint() {
   const em = document.querySelector('#wk em'); if (!em || wkSel()) return;
-  if (!em.firstChild) em.innerHTML = '<span data-k="g">显卡<span data-k="gu"></span> <span data-k="gm"></span></span> <span data-k="m">内存<span data-k="mp"></span></span>';
+  if (!em.firstChild) em.innerHTML = '<span data-k="g"><span class="c" data-k="c1">显卡<span data-k="gu"></span></span> <span class="c" data-k="gm"></span></span> <span data-k="m">内存<span data-k="mp"></span></span>';
   const q = (k) => em.querySelector('[data-k="' + k + '"]'), d = gpuD || {}, f1 = (v) => Number(v).toFixed(1), f0 = (v) => Math.round(Number(v));
   const put = (k, t, pct) => { const e = q(k); wkTxt(e, t); e.classList.toggle('hot', pct > 85); };   // 任何一项超过 85% 就变红，平时整行都是灰的
   q('g').style.display = d.total ? '' : 'none'; q('m').style.display = d.memTotal ? '' : 'none';
   if (d.total) {
-    put('gu', String(d.util).padStart(3, '\u2007') + '%', d.util);
-    put('gm', String(f0(d.used)).padStart(2, '\u2007') + '/' + f0(d.total) + 'G', d.used / d.total * 100);
+    const key = f0(d.total) + '|' + getComputedStyle(em).fontSize;
+    if (em._mw !== key) {   // 栏宽按最宽的情况量一次：「显卡100%」「24/24G」
+      const c1 = q('c1'), gu = q('gu'), gm = q('gm'); c1.style.minWidth = gm.style.minWidth = '';
+      const o = gu.textContent; gu.textContent = '100%'; const w1 = c1.offsetWidth; gu.textContent = o;
+      const og = gm.textContent; gm.textContent = f0(d.total) + '/' + f0(d.total) + 'G'; const w2 = gm.offsetWidth; gm.textContent = og;
+      if (w1 && w2) { c1.style.minWidth = w1 + 'px'; gm.style.minWidth = w2 + 'px'; em._mw = key; }
+    }
+    put('gu', d.util + '%', d.util);
+    put('gm', f0(d.used) + '/' + f0(d.total) + 'G', d.used / d.total * 100);
     wkTip(q('g'), `${d.name || '显卡'}：${d.util >= 20 ? '运算中' : '空闲中'}，显存 ${f1(d.used)} / ${d.total} GB`);
   }
   if (d.memTotal) {
     const mp = Math.round(d.memUsed / d.memTotal * 100);
-    put('mp', String(mp).padStart(2, '\u2007') + '%', mp);
+    put('mp', mp + '%', mp);
     wkTip(q('m'), `内存 ${f1(d.memUsed)} / ${f1(d.memTotal)} GB` + (d.virtTotal ? `，虚拟内存 ${f1(d.virtUsed)} / ${f1(d.virtTotal)} GB` : ''));   // 虚拟内存只放在鼠标提示里
   }
 }
+// 每类活可能出现的最长文字：开工时按它定好文字那段的宽度，中途换字不伸缩；真遇到更长的才加宽（最多 30 个字宽，再长显示「…」）
+const WK_LONG = {
+  '对话': ['正在等你点「同意」或「拒绝」', '正在画图 第 30 / 30 步（100%）', '正在执行：crm_customer_detail', '图已画好，AI 正在写回复'],
+  '学习循环': ['学习第 99 轮 · 第 99 步 · 模型在写（9999 字）', '正在执行：crm_customer_detail'],
+};
+// 复制这一行：各段之间用空格连成一行（不然会被拆成好几行）
+document.addEventListener('copy', (e) => { const w = document.getElementById('wk'), s = getSelection(); if (!w || !s.rangeCount || !w.contains(s.anchorNode) || !w.contains(s.focusNode)) return; e.preventDefault(); e.clipboardData.setData('text/plain', s.toString().replace(/\s*\n\s*/g, ' ').trim()); });
 // 思考动画：8 个红色小球，像毒液的共生体那样彼此融合。
 // 每一轮：摆成一个形状 → 8 颗两两粘成 4 团 → 再粘成 2 团 → 粘成 1 团（在团里蠕动）→ 倒着一层层分裂 → 长成另一个形状（每次随机换，不和上一个重复）
 // 形状有三个：立方体、晶格（立方晶体，原子在原位热振动）、三叶结（数学里最简单的纽结，球沿着它追）。整体绕竖轴转、固定斜着看
@@ -1187,15 +1204,18 @@ setInterval(() => {
   if (run && (!wk.t0 || wk.kind !== S.busy)) { wk.t0 = wk.last = Date.now(); if (S.busySince && S.busySince <= wk.t0) wk.t0 = S.busySince; wk.label = ''; wk.kind = S.busy; if (S.busySince && Date.now() - S.busySince > 2000) wk.last = Date.now() - 2000; }   // 刷新页面时 AI 早就在忙：别再藏 1.5 秒   // 任何要长时间运算的活（对话、任务队列、线索挖掘、上线下线）都显示
   if (!el) el = h('div', '', '<i></i><span></span><b></b><em></em>'), el.id = 'wk', wkBalls(el.firstChild);
   if (wkSel()) return;   // 正在选这一行的字：不刷新、不挪位置，松手复制完再接着走
-  el.classList.toggle('idle', !run);
-  const stick = atBottom();
+  el.classList.toggle('idle', !run); if (!run) el._lk = '';
+  const stick = atBottom(), fresh = !el.isConnected; if (fresh) chat.appendChild(el);   // 先放进页面再量宽度（不在页面里量出来是 0）
   if (run) {
     const lb = chat.querySelector('.confirm [data-ok]') ? '正在等你点「同意」或「拒绝」' : wk.label || S.wkLabel || (S.busy === '对话' ? '正在等模型回答' : '正在' + S.busy);
-    wkTxt(el.children[1], lb); wkTip(el.children[1], lb);
+    const ls = el.children[1];
+    if (el._lk !== S.busy) { const w = Math.max(...(WK_LONG[S.busy] || ['正在等你点「同意」或「拒绝」']).map((t) => wkMeasure(ls, t))); if (w > 0) { el._lk = S.busy; el._lw = w; ls.style.width = w + 1 + 'px'; } }
+    wkTxt(ls, lb); wkTip(ls, lb);
+    if (el._lk && ls.scrollWidth > el._lw + 1) { el._lw = ls.scrollWidth; ls.style.width = el._lw + 1 + 'px'; }
     wkTxt(el.children[2], '已 ' + Math.round((Date.now() - wk.t0) / 1000) + ' 秒');
   }
   gpuPaint();
-  if (chat.lastElementChild !== el) { chat.appendChild(el); if (stick) chat.scrollTop = chat.scrollHeight; }
+  if (fresh || chat.lastElementChild !== el) { chat.appendChild(el); if (stick) chat.scrollTop = chat.scrollHeight; }
 }, 400);
 let quoted = null;
 function setQuote(q) { quoted = q; try { if (q) localStorage.setItem('inpQuote', JSON.stringify(q)); else localStorage.removeItem('inpQuote'); } catch (e) {} const c = $('#qchip'); c.style.display = q ? 'flex' : 'none'; if (q) c.querySelector('.qt').textContent = '引用 ' + (q.who === 'ai' ? 'AI' : '你') + '：' + q.text.replace(/\s+/g, ' ').slice(0, 80); }
