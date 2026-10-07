@@ -1103,8 +1103,9 @@ let gpuD = null;
 function hwHTML() {
   if (!gpuD) return '';
   const f1 = (v) => Number(v).toFixed(1), f0 = (v) => Math.round(Number(v)), p = [];
-  if (gpuD.total) p.push(`<span title="${esc(gpuD.name || '显卡')}：${gpuD.util >= 20 ? '运算中' : '空闲中'}，显存 ${f1(gpuD.used)} / ${gpuD.total} GB">显卡<span class="${gpuD.util >= 20 ? 'hot' : ''}">${gpuD.util}%</span> ${f0(gpuD.used)}/${f0(gpuD.total)}G</span>`);
-  if (gpuD.memTotal) p.push(`<span title="内存 ${f1(gpuD.memUsed)} / ${f1(gpuD.memTotal)} GB${gpuD.virtTotal ? `，虚拟内存 ${f1(gpuD.virtUsed)} / ${f1(gpuD.virtTotal)} GB` : ''}">内存${Math.round(gpuD.memUsed / gpuD.memTotal * 100)}%</span>`);   // 虚拟内存只放在鼠标提示里
+  const hot = (v, t) => v > 85 ? `<span class="hot">${t}</span>` : t;   // 任何一项超过 85% 就变红，平时整行都是灰的
+  if (gpuD.total) p.push(`<span title="${esc(gpuD.name || '显卡')}：${gpuD.util >= 20 ? '运算中' : '空闲中'}，显存 ${f1(gpuD.used)} / ${gpuD.total} GB">显卡${hot(gpuD.util, gpuD.util + '%')} ${hot(gpuD.used / gpuD.total * 100, f0(gpuD.used) + '/' + f0(gpuD.total) + 'G')}</span>`);
+  if (gpuD.memTotal) { const mp = Math.round(gpuD.memUsed / gpuD.memTotal * 100); p.push(`<span title="内存 ${f1(gpuD.memUsed)} / ${f1(gpuD.memTotal)} GB${gpuD.virtTotal ? `，虚拟内存 ${f1(gpuD.virtUsed)} / ${f1(gpuD.virtTotal)} GB` : ''}">内存${hot(mp, mp + '%')}</span>`); }   // 虚拟内存只放在鼠标提示里
   return p.join(' ');
 }
 function gpuPaint() { const em = document.querySelector('#wk em'); if (!em) return; const v = hwHTML(); if (em._hw !== v) em.innerHTML = em._hw = v; }
