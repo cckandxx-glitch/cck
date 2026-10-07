@@ -30,7 +30,8 @@ const busyDoing = () => ({ '对话': 'AI 正在回复或画图', '任务队列':
 const busyMsg = (what) => busyDoing() + '，现在不能' + what + '。等它做完，或点「急停」后再试。';
 let unattended = false;
 let allowAll = false;   // 用户点了「本次任务全部同意」：这一轮里不再逐条问（删除和危险命令除外）
-const DANGER = /\b(Remove-Item|rm|rmdir|del|erase|format|diskpart|shutdown|Restart-Computer|Stop-Computer|reg(\.exe)?\s+(add|delete)|Set-ExecutionPolicy|net\s+user|schtasks|taskkill|Stop-Process|bcdedit|cipher)\b/i;
+// 前后不能紧挨字母或「-」：否则 Format-Table、Get-Date -Format 这类只读命令会被当成 format 弹确认（10-07）
+const DANGER = /(?<![\w-])(Remove-Item|rm|rmdir|del|erase|format|diskpart|shutdown|Restart-Computer|Stop-Computer|reg(\.exe)?\s+(add|delete)|Set-ExecutionPolicy|net\s+user|schtasks|taskkill|Stop-Process|bcdedit|cipher)(?![\w-])/i;
 const isRisky = (d) => !!d && (d.kind === 'batch' ? (d.items || []).some((x) => isRisky(x.detail)) : d.kind === 'delete' || (d.kind === 'command' && DANGER.test(String(d.command || ''))));
 const queue = { items: [], cancel: false };
 // ---------- 学习循环（2026-10-06 用户设定）：说"请学习/继续学"就一直跑，每轮学完自动开下一轮，只在聊天框汇报，不弹确认；说"停止学习"或点急停才停 ----------
