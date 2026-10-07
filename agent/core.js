@@ -610,9 +610,11 @@ ${learnTodo()}
     let stalled = '', stallT; const arm = (ms, kind) => { clearTimeout(stallT); stallT = setTimeout(() => { stalled = kind || 'mid'; abortCtl.abort(); }, ms); };   // 等第一个字最多 5 分钟（冷启动加载大模型要久），出字以后 2 分钟没动静就当它挂了
     // 学习模式：单次回答最多 8 分钟，到点就中断，这一步算失败、自动重试（10-07：一次回答卡了 600 多秒，显卡 100% GPU，是模型在一直往下写停不下来）
     // 学习时不用「2 分钟没动静」判断：模型在写工具调用（比如一整篇笔记）时 Ollama 要等整段写完才一起发出来，中间几分钟一个字都不吐，不是挂了（10-07 写英文话术那轮就是这样被反复中断、一直重来）
-    const capT = lean ? setTimeout(() => { stalled = 'cap'; abortCtl.abort(); }, 480000) : null;
+    // 聊天也要有上限：开着「思考」时模型可能一直想、一直吐思考内容，「2 分钟没动静」拦不住，看着就是停在那不出下一条（10-07 18:24 查完两个 CRM 客户后就是这样）
+    const capMin = lean ? 8 : (cfg.stepMaxMin || 10);
+    const capT = setTimeout(() => { stalled = 'cap'; abortCtl.abort(); }, capMin * 60000);
     try { arm(300000, 'start'); return await chatOnceRun(extraOpts, lean ? () => clearTimeout(stallT) : (ms) => arm(ms), noTools); }
-    catch (e) { if (stalled && e.name === 'AbortError') throw new Error({ cap: '单步超过 8 分钟没写完', start: '模型 5 分钟没开始回答，已中断，可点「重试」', mid: '模型 2 分钟没有新内容，已中断，可点「重试」' }[stalled]); throw e; }
+    catch (e) { if (stalled && e.name === 'AbortError') throw new Error({ cap: `这一步超过 ${capMin} 分钟还没写完（多半是一直在想），已中断，可点「重试」`, start: '模型 5 分钟没开始回答，已中断，可点「重试」', mid: '模型 2 分钟没有新内容，已中断，可点「重试」' }[stalled]); throw e; }
     finally { clearTimeout(stallT); clearTimeout(capT); }
   }
   async function chatOnceRun(extraOpts, arm, noTools) {
@@ -722,6 +724,7 @@ ${learnTodo()}
           try {
             const ext = extraTools.find((x) => x.def.function.name === name && extraOn(x));
             if (!ext && !IMPL[name]) throw new Error('没有这个工具: ' + name);
+            if (lean && !LEARN_TOOLS.has(name)) throw new Error('学习时不能用 ' + name + '，只用查资料和读写笔记的工具');   // 模型照着旧聊天记录调 CRM 之类的工具：学习时不执行
             if ((name === 'web_search' || name === 'fetch_url') && !cfg.online) throw new Error('联网开关是关的');
             if (batch && batch.has(c) && !batchOk) result = '用户拒绝了这一批操作。';
             else { preOk = !!(batch && batch.has(c)); try { result = ext ? await ext.run(args || {}) : await IMPL[name](args || {}); } finally { preOk = false; } }
@@ -755,6 +758,7 @@ ${learnTodo()}
     } catch (e) {
       if (opts.sub && (e.name === 'AbortError' || e.name === 'StopError')) throw e;
       if (e.name === 'AbortError' || e.name === 'StopError') { emit('stopped', {}); log('stop', {}); return lastText; }
+      log('error', { text: e.message });   // 出错也记进日志，查「后来怎么没下文了」时看得到
       if (opts.loop) emit('done', {}); else emit('error', { text: e.message });   // 学习中出错不在聊天里报（循环会自己重试，连错 3 次才说一句）
       throw e;
     }
