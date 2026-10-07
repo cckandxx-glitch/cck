@@ -200,9 +200,10 @@ textarea{width:100%;padding:10px 12px;border:1px solid var(--line2);border-radiu
 #wk b{font-weight:400;font-variant-numeric:tabular-nums}
 #wk>span::selection{-webkit-text-fill-color:var(--ink)}   /* 文字本身是透明渐变，选中时显示成正常字色 */
 #wk>span{flex:none;width:17em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}   /* 文字长短不一：这一段定宽，后面的秒数和硬件数据就不会跟着前后伸缩 */
-#wk>b{flex:none;min-width:4.6em}   /* 「已 9 秒」到「已 999 秒」宽度不变 */
+#wk>b{flex:none;min-width:4.6em;text-align:right}   /* 「已 9 秒」到「已 999 秒」宽度不变；靠右对齐，多出的空白落在前面文字那段的空白里，后面的点紧挨着秒数 */
 #wk em{font-style:normal;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;opacity:.75}
-#wk:not(.idle) em:not(:empty)::before{content:'·';margin-right:10px}
+#wk:not(.idle) em{margin-left:-4px}
+#wk:not(.idle) em:not(:empty)::before{content:'·';margin-right:6px}   /* 点两边各约 6px */
 #wk em .hot{color:#e5484d}
 #wk.idle i,#wk.idle>span,#wk.idle>b{display:none}
 .notice.rc{display:flex;align-items:center;gap:12px;font-size:13px;opacity:.85}   /* 撤回提示：居中、两边细线，和 AI 说的话区分开 */
