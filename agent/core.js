@@ -612,13 +612,28 @@ ${learnTodo()}
     // 学习时不用「2 分钟没动静」判断：模型在写工具调用（比如一整篇笔记）时 Ollama 要等整段写完才一起发出来，中间几分钟一个字都不吐，不是挂了（10-07 写英文话术那轮就是这样被反复中断、一直重来）
     // 聊天也要有上限：开着「思考」时模型可能一直想、一直吐思考内容，「2 分钟没动静」拦不住，看着就是停在那不出下一条（10-07 18:24 查完两个 CRM 客户后就是这样）
     const capMin = lean ? 8 : (cfg.stepMaxMin || 10);
-    const capT = setTimeout(() => { stalled = 'cap'; abortCtl.abort(); }, capMin * 60000);
-    try { arm(300000, 'start'); return await chatOnceRun(extraOpts, lean ? () => clearTimeout(stallT) : (ms) => arm(ms), noTools); }
-    catch (e) { if (stalled && e.name === 'AbortError') throw new Error({ cap: `这一步超过 ${capMin} 分钟还没写完（多半是一直在想），已中断，可点「重试」`, start: '模型 5 分钟没开始回答，已中断，可点「重试」', mid: '模型 2 分钟没有新内容，已中断，可点「重试」' }[stalled]); throw e; }
-    finally { clearTimeout(stallT); clearTimeout(capT); }
+    let capT = null;
+    const bail = (kind) => { stalled = kind; abortCtl.abort(); };
+    // 10-07 用户：光兜住不算解决。模型想进死循环（同一段话反复想）或想得太长时，不报错，而是关掉「思考」让它这一步直接回答，活接着干
+    for (let noThink = false; ; noThink = true) {
+      clearTimeout(capT); capT = setTimeout(() => bail('cap'), capMin * 60000);
+      try { arm(300000, 'start'); return await chatOnceRun(extraOpts, lean ? () => clearTimeout(stallT) : (ms) => arm(ms), noTools, noThink, bail); }
+      catch (e) {
+        if (stalled && e.name === 'AbortError') {
+          if ((stalled === 'thinkloop' || stalled === 'thinklong') && !noThink && !stopped) {
+            log('think_retry', { why: stalled === 'thinkloop' ? '思考在原地打转' : '思考太长' });
+            emit('thinking', { text: '想太久了，改成直接回答' });
+            stalled = ''; abortCtl = new AbortController(); continue;
+          }
+          throw new Error({ cap: `这一步超过 ${capMin} 分钟还没写完，已中断，可点「重试」`, start: '模型 5 分钟没开始回答，已中断，可点「重试」', mid: '模型 2 分钟没有新内容，已中断，可点「重试」', thinkloop: '模型思考一直在原地打转，已中断，可点「重试」', thinklong: '模型想得太久，已中断，可点「重试」' }[stalled]);
+        }
+        throw e;
+      }
+      finally { clearTimeout(stallT); clearTimeout(capT); }
+    }
   }
-  async function chatOnceRun(extraOpts, arm, noTools) {
-    const body = { model: cfg.model, messages: sendMsgs(), ...(noTools ? {} : { tools: allTools() }), stream: true, think: lean ? !!cfg.learnThink : cfg.think, keep_alive: -1, options: { num_ctx: ctxN(), ...(lean ? { num_predict: cfg.learnPredict || 4096 } : {}), ...(extraOpts || {}) } };   // 学习时一次最多写 4096 个词元，防止模型复读停不下来
+  async function chatOnceRun(extraOpts, arm, noTools, noThink, bail) {
+    const body = { model: cfg.model, messages: sendMsgs(), ...(noTools ? {} : { tools: allTools() }), stream: true, think: noThink ? false : lean ? !!cfg.learnThink : cfg.think, keep_alive: -1, options: { num_ctx: ctxN(), ...(lean ? { num_predict: cfg.learnPredict || 4096 } : {}), ...(extraOpts || {}) } };   // 学习时一次最多写 4096 个词元，防止模型复读停不下来
     let r;
     for (let tryN = 0; ; tryN++) {   // Ollama 推理进程偶尔崩一下（500 / 连不上），自己会重启：等几秒重试一次，别让用户重发
       try { r = await fetch(cfg.ollama + '/api/chat', { method: 'POST', signal: abortCtl.signal, body: JSON.stringify(body) }); }
@@ -633,13 +648,20 @@ ${learnTodo()}
       break;
     }
     if (!r.ok) throw new Error('Ollama 返回 ' + r.status + ': ' + (await r.text()).slice(0, 200));
-    let content = '', calls = [], buf = '', thinking = false, stats = null, thinkN = 0; const dec = new TextDecoder();
+    let content = '', calls = [], buf = '', thinking = false, stats = null, thinkN = 0, thinkTxt = '', checkedAt = 0; const dec = new TextDecoder();
+    const THINK_MAX = cfg.thinkMaxChars || 20000;   // 一步最多想这么多字（38 词元/秒下约两三分钟），再多基本是在绕圈子
     for await (const chunk of r.body) {
       arm(120000); buf += dec.decode(chunk, { stream: true }); let i;
       while ((i = buf.indexOf('\n')) >= 0) {
         const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1); if (!line) continue;
         const j = JSON.parse(line), m = j.message || {};
-        if (m.thinking) { thinkN += m.thinking.length; if (!thinking) { thinking = true; emit('thinking', {}); } }
+        if (m.thinking) {
+          thinkN += m.thinking.length; if (!thinking) { thinking = true; emit('thinking', {}); }
+          thinkTxt = (thinkTxt + m.thinking).slice(-30000);
+          // 每多想 1000 字查一次：最后 200 字在前面一字不差出现过 = 在原地打转
+          if (thinkN - checkedAt >= 1000) { checkedAt = thinkN; const tail = thinkTxt.slice(-200); if (tail.trim().length >= 100 && thinkTxt.indexOf(tail) < thinkTxt.length - 200) { bail('thinkloop'); throw Object.assign(new Error('思考打转'), { name: 'AbortError' }); } }
+          if (thinkN > THINK_MAX && !content) { bail('thinklong'); throw Object.assign(new Error('思考太长'), { name: 'AbortError' }); }
+        }
         if (m.content) { thinking = false; if (!quietTok) emit('token', { text: m.content }); content += m.content; if (quietTok && Date.now() - quietAt > 1500) { quietAt = Date.now(); emit('quiet', { n: content.length }); } }   // 学习时字不上屏，但要让界面知道模型还在写、写了多少，不然看着像卡住
         if (m.tool_calls) calls.push(...m.tool_calls);
         if (j.done) stats = j;
