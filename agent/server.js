@@ -41,11 +41,15 @@ const learn = { on: false, round: 0, stopped: false, inbox: [], yielding: false,
 const LEARNF = path.join(__dirname, 'learn.json');
 const saveLearn = (on) => { try { if (on) fs.writeFileSync(LEARNF, JSON.stringify({ on: true, round: learn.round, since: learn.since || Date.now() })); else if (fs.existsSync(LEARNF)) fs.unlinkSync(LEARNF); } catch (e) {} };
 saveLearn(false); process.on('exit', () => saveLearn(false));
+// 10-07：「刚才在学习」要记到文件里，关掉助手重开后只说「继续」也接着学习循环（17:31 重开发「继续」被当成普通聊天，跑完一轮就停了，一直停到 18:14）
+const RESUMEF = path.join(__dirname, 'learn-resume.json');
+const setResumable = (v) => { learn.resumable = !!v; try { if (v) fs.writeFileSync(RESUMEF, '{"resumable":true}'); else if (fs.existsSync(RESUMEF)) fs.unlinkSync(RESUMEF); } catch (e) {} };
+learn.resumable = fs.existsSync(RESUMEF);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const LEARN_PROMPT = () => '（学习第 ' + learn.round + ' 轮：按自学计划学 1~2 个主题，存进知识库。最后只写一行（不超过 60 字），格式：学了 XX；存进 XX；下一轮 XX。）';
 function stopLearn(reason) {
   if (!learn.on) return;
-  learn.on = false; learn.stopped = true; learn.resumable = true; learn.inbox = []; saveLearn(false);
+  learn.on = false; learn.stopped = true; setResumable(true); learn.inbox = []; saveLearn(false);
   core.stop(); skipAsks();
   for (const [id, p] of pending) { pending.delete(id); p.resolve(false); bc('confirm_done', { id, answered: '已拒绝' }); }
   notice('已停止学习。');
@@ -290,7 +294,7 @@ ${text}` : text;
     if (isStopLearnCmd(text)) { if (learn.on) { stopLearn('你说"停止学习"'); } else notice('没在学习。'); return; }
     // 10-07：急停学习后只说「继续」，用户的意思是接着学，不是让 AI 接着聊
     const resume = !learn.on && learn.resumable && /^(继续|接着|接着来|继续吧|接着学|继续学)[。!！]?$/.test(String(text).trim());
-    if (!isLearnCmd(text) && !resume) learn.resumable = false;
+    if (!learn.on && !isLearnCmd(text) && !resume) setResumable(false);   // 学习中插话不算放弃学习
     if (isLearnCmd(text) || resume) {
       if (learn.on) { notice('已在学习中。'); return; }
       runLearnLoop(resume ? '继续学习' : mtext).catch((e) => { bbS('学习循环异常退出', e); notice('学习出错退出：' + e.message); }); return;   // 不接住的话一个意外错误就会让整个后台崩掉（unhandledRejection → exit）
@@ -309,7 +313,7 @@ ${text}` : text;
 async function runLearnLoop(firstText) {
   learn.on = true; learn.stopped = false; learn.inbox = []; learn.yielding = false;
   learn.round = 0; learn.since = Date.now();
-  saveLearn(true);
+  saveLearn(true); setResumable(true);   // 学着学着关了窗口：重开后说「继续」就接着学
   busy = '学习循环'; bc('state', {});
   // 学习要占用 busy；用户插话、游戏让路时会临时让出，拿回来前等别的事做完
   const claim = async () => { while (learn.on && busy && busy !== '学习循环') await sleep(500); if (learn.on) { busy = '学习循环'; bc('state', {}); } };
