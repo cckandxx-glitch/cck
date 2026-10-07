@@ -31,14 +31,20 @@ const busyMsg = (what) => busyDoing() + '，现在不能' + what + '。等它做
 let unattended = false;
 let allowAll = false;   // 用户点了「本次任务全部同意」：这一轮里不再逐条问（删除和危险命令除外）
 const DANGER = /\b(Remove-Item|rm|rmdir|del|erase|format|diskpart|shutdown|Restart-Computer|Stop-Computer|reg(\.exe)?\s+(add|delete)|Set-ExecutionPolicy|net\s+user|schtasks|taskkill|Stop-Process|bcdedit|cipher)\b/i;
-const isRisky = (d) => !!d && (d.kind === 'delete' || (d.kind === 'command' && DANGER.test(String(d.command || ''))));
+const isRisky = (d) => !!d && (d.kind === 'batch' ? (d.items || []).some((x) => isRisky(x.detail)) : d.kind === 'delete' || (d.kind === 'command' && DANGER.test(String(d.command || ''))));
 const queue = { items: [], cancel: false };
 // ---------- 学习循环（2026-10-06 用户设定）：说"请学习/继续学"就一直跑，每轮学完自动开下一轮，只在聊天框汇报，不弹确认；说"停止学习"或点急停才停 ----------
-const learn = { on: false, round: 0, stopped: false };
-const LEARN_PROMPT = () => '（学习循环第 ' + (learn.round + 1) + ' 轮：本轮按自学计划深挖 1~2 个主题。结束时只用一行汇报：学了什么 → 存在哪个文件。不要解释学习循环怎么运作，不要问问题、不要等指示，下一轮会自动开始。）';
+const learn = { on: false, round: 0, stopped: false, inbox: [], yielding: false, since: 0, resumable: false };   // resumable：刚急停/停止了学习，这时只说「继续」也算继续学习
+// 10-07 用户：开着助手时 24 小时不停学，直到说"停止学习"；但关掉助手后不自动接着学，要用户再说一次"继续学习"。
+// learn.json 只是「正在学」的标记，给外壳用（学习中不让电脑睡眠、关窗先问一句）；后台一启动、一退出都删掉
+const LEARNF = path.join(__dirname, 'learn.json');
+const saveLearn = (on) => { try { if (on) fs.writeFileSync(LEARNF, JSON.stringify({ on: true, round: learn.round, since: learn.since || Date.now() })); else if (fs.existsSync(LEARNF)) fs.unlinkSync(LEARNF); } catch (e) {} };
+saveLearn(false); process.on('exit', () => saveLearn(false));
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const LEARN_PROMPT = () => '（学习第 ' + learn.round + ' 轮：按自学计划学 1~2 个主题，存进知识库。最后只写一行：学了什么 → 存在哪 → 下一轮学什么。）';
 function stopLearn(reason) {
   if (!learn.on) return;
-  learn.on = false; learn.stopped = true;
+  learn.on = false; learn.stopped = true; learn.resumable = true; learn.inbox = []; saveLearn(false);
   core.stop(); skipAsks();
   for (const [id, p] of pending) { pending.delete(id); p.resolve(false); bc('confirm_done', { id, answered: '已拒绝' }); }
   notice('已停止学习。');
@@ -67,7 +73,8 @@ function persist() {
   if (!cur || !dirty || !hasUser()) return;
   const messages = core.getHistory().map((m) => { const c = { ...m }; delete c.images; return c; });
   const rec = { id: cur.id, title: cur.title, created: cur.created, updated: Date.now(), droppedUsers, tr, messages };
-  const f = cfile(cur.id); fs.writeFileSync(f + '.tmp', JSON.stringify(rec)); fs.renameSync(f + '.tmp', f);
+  const f = cfile(cur.id);
+  try { fs.writeFileSync(f + '.tmp', JSON.stringify(rec)); fs.renameSync(f + '.tmp', f); } catch (e) { bbS('保存对话失败（下次再存）', e.message); return; }   // Windows 上杀毒/索引偶尔锁住文件，存不上就下次再存，不能让学习循环因此出错或后台崩掉
   try { const lf = path.join(CONVLOGDIR, cur.id + '.json'); fs.writeFileSync(lf + '.tmp', JSON.stringify(rec)); fs.renameSync(lf + '.tmp', lf); } catch (e) {}
   convs.set(cur.id, { id: cur.id, title: cur.title, updated: rec.updated }); dirty = false;
 }
@@ -119,7 +126,7 @@ function gpuStart() {
 function gpuStop() { if (gpuProc) { try { gpuProc.kill(); } catch (e) {} gpuProc = null; } }
 process.on('exit', gpuStop);
 const notice = (text) => { push({ role: 'notice', text }); bc('notice', { text }); };
-// 自动上线：不在聊天里留话，只在底部状态行显示「上线中…」，上线后自动消失（2026-10-07 用户：这类状态话越少越好）
+// 自动上线：不在聊天里留话，只在底部状态行显示「上线中…」，上线后自动消失（2026-10-07 用户：能不说的就不说）
 function bootNotice() {
   core.imgUnloaded = false;
   const t = '上线中…'; wkLabel = t; bc('state', {});
@@ -151,7 +158,7 @@ function onEvent(type, d) {
   else if (type === 'toolresult') push({ role: 'result', name: d.name, text: d.text });
   else if (type === 'notice') push({ role: 'notice', text: d.text });
   else if (type === 'error') push({ role: 'notice', text: '出错: ' + d.text });
-  else if (type === 'stopped') push({ role: 'notice', text: '已急停。' });
+  else if (type === 'stopped') { if (learn.yielding) { learn.yielding = false; bc('done', {}); return; } push({ role: 'notice', text: '已急停。' }); }   // 学习让路（插话 / 游戏）：静默收尾，不留话
   else if (type === 'lead') { leadLog.push(d); if (leadLog.length > 400) leadLog.shift(); }
   if (type === 'done' || type === 'stopped' || type === 'error') persist();
   bc(type, d);
@@ -159,11 +166,12 @@ function onEvent(type, d) {
 
 function ask(q, detail) {
   if (learn.on) {            // 学习循环：不弹确认，直接自动同意（用户 2026-10-06：学习时不要让我点任何确认）
-    if (isRisky(detail)) { notice('已跳过：' + q.split('\n')[0]); return Promise.resolve(false); }   // 自动同意不打扰（2026-10-07 用户要求）
+    if (isRisky(detail)) { return Promise.resolve(false); }   // 自动同意不打扰（2026-10-07 用户要求）
     return Promise.resolve(true);
   }
   if (unattended) {          // 无人值守：只允许往 任务结果/草稿/线索 写文件，其余一律拒绝
-    const ok = detail.kind === 'write' && ['任务结果', '草稿', '线索'].some((d) => path.resolve(detail.path).startsWith(path.join(core.WS, d) + path.sep));
+    const okOne = (dt) => dt.kind === 'write' && ['任务结果', '草稿', '线索'].some((d) => path.resolve(dt.path).startsWith(path.join(core.WS, d) + path.sep));
+    const ok = detail.kind === 'batch' ? (detail.items || []).every((x) => okOne(x.detail)) : okOne(detail);
     if (!ok) notice('已拒绝：' + q.split('\n')[0]);
     return Promise.resolve(ok);
   }
@@ -176,8 +184,7 @@ function ask(q, detail) {
 }
 
 function choose(questions) {
-  if (learn.on) return Promise.resolve(null);   // 学习中 AI 的提问直接跳过，不提示
-  if (unattended) return Promise.resolve(null);
+  if (learn.on || unattended) return Promise.resolve(null);   // 学习 / 无人值守时 AI 的提问直接跳过，不提示
   const id = ++cid;
   return new Promise((resolve) => {
     asks.set(id, { questions, resolve: (a) => { resolve(a); } });   // 2026-10-06 用户规则：提问不设超时，一直等
@@ -185,7 +192,7 @@ function choose(questions) {
   });
 }
 
-const core = createCore(cfg, { ask, choose, emit: onEvent });
+const core = createCore(cfg, { ask, choose, emit: onEvent, revive: async () => { await ensureOllama(); } });
 newConv();
 const pw = power.make(cfg);
 // 记「有人让 AI 下线过」：点按钮、对话里说下线、自动模式因游戏让出，都走 pw.off；上线或模型重新在显存里就清掉。界面显示据此只分在线 / 下线两种
@@ -218,15 +225,19 @@ function offerForce(g, pendingText) {
   bc('bar', {}); bc('state', {});
 }
 // 助手关掉时让模型一起下线（模型是「一直在线」的，不然助手关了显存还被占着）
-const OLLAMA_EXE = path.join(__dirname, '..', 'Ollama', 'ollama.exe');   // 只起后台服务 serve：没有窗口、没有托盘图标，不会跳出来
+// 只起后台服务 serve：没有窗口、没有托盘图标，不会跳出来。
+// 先找助手目录里自带的 Ollama，没有就用正常安装的那份（10-07 用户电脑上自带的不在，Ollama 一直起不来，只报 fetch failed）
+const OLLAMA_EXE = [path.join(__dirname, '..', 'Ollama', 'ollama.exe'), path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Ollama', 'ollama.exe')].find((p) => { try { return fs.statSync(p).isFile(); } catch (e) { return false; } }) || 'ollama';
 const killOllama = () => { try { execFileSync('taskkill', ['/f', '/t', '/im', 'ollama app.exe', '/im', 'ollama.exe', '/im', 'llama-server.exe'], { stdio: 'ignore' }); } catch (e) {} };   // 模型跑在子进程 llama-server 里：只杀 ollama 它会变孤儿占着显存，下次加载挤不进显卡、慢到超时（10-05 实测占 5GB）
 const ollamaUp = () => new Promise((ok) => { const r = require('http').get(cfg.ollama + '/api/version', (res) => { res.resume(); ok(true); }); r.on('error', () => ok(false)); r.setTimeout(1500, () => { r.destroy(); ok(false); }); });
 async function ensureOllama() {   // 助手开 Ollama 跟着开，助手关 Ollama 跟着关
   if (await ollamaUp()) return;
   try { execFileSync('taskkill', ['/f', '/im', 'llama-server.exe'], { stdio: 'ignore' }); } catch (e) {}   // Ollama 没在跑，这时还在的 llama-server 都是上次留下的孤儿
   // flash attention + 8 位 KV 缓存：同样显存装两倍上下文（10-05 实测 128K 整个在显卡里，160K 放不下）
-  try { spawn(OLLAMA_EXE, ['serve'], { stdio: 'ignore', windowsHide: true, env: { ...process.env, OLLAMA_FLASH_ATTENTION: '1', OLLAMA_KV_CACHE_TYPE: 'q8_0' } }).unref(); } catch (e) {}
+  try { spawn(OLLAMA_EXE, ['serve'], { stdio: 'ignore', windowsHide: true, env: { ...process.env, OLLAMA_FLASH_ATTENTION: '1', OLLAMA_KV_CACHE_TYPE: 'q8_0' } }).on('error', (e) => bbS('Ollama 启动失败', e)).unref(); } catch (e) {}   // 找不到 exe 时 spawn 会异步报 error，不接住整个后台就崩了
   for (let i = 0; i < 40; i++) { if (await ollamaUp()) return; await new Promise((r) => setTimeout(r, 500)); }
+  bbS('Ollama 20 秒内没起来，用的是', OLLAMA_EXE);
+  notice('Ollama 启动不了，请手动打开。');
 }
 process.on('exit', () => { desk.close(); imggen.close(); auto.close(); try { execFileSync('curl.exe', ['--noproxy', '*', '-s', '-m', '5', '-d', '@-', cfg.ollama + '/api/generate'], { input: JSON.stringify({ model: cfg.model, keep_alive: 0 }), stdio: ['pipe', 'ignore', 'ignore'] }); } catch (e) {} killOllama(); });
 for (const sg of ['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGBREAK']) process.on(sg, () => { bbS('收到信号', sg); process.exit(0); });
@@ -260,15 +271,20 @@ ${text}` : text;
   busy = act ? 'AI 上线/下线' : '对话'; bc('state', {});
   try {
     if (act === 'on') { const g = auto.blocking(); if (g && (await pw.status()).state === 'off') { offerForce(g); return; } }
-    if (act) { const r = act === 'off' ? await pw.off() : await pw.on(); if (!r.ok) notice(r.text); if (r.ok) auto.manual(act); return; }
+    if (act) { const r = act === 'off' ? await pw.off() : await pw.on(); notice(r.ok ? (act === 'off' ? '已下线。' : '已上线。') : r.text); if (r.ok) auto.manual(act); return; }
     unattended = false; allowAll = false; core.resetStop();
     // 学习循环口令：说"请学习/继续学"就一直学，直到说"停止学习"（2026-10-06 用户设定）
     if (isStopLearnCmd(text)) { if (learn.on) { stopLearn('你说"停止学习"'); } else notice('没在学习。'); return; }
-    if (isLearnCmd(text)) {
+    // 10-07：急停学习后只说「继续」，用户的意思是接着学，不是让 AI 接着聊
+    const resume = !learn.on && learn.resumable && /^(继续|接着|接着来|继续吧|接着学|继续学)[。!！]?$/.test(String(text).trim());
+    if (!isLearnCmd(text) && !resume) learn.resumable = false;
+    if (isLearnCmd(text) || resume) {
       if (learn.on) { notice('已在学习中。'); return; }
-      runLearnLoop(mtext); return;
+      runLearnLoop(resume ? '继续学习' : mtext).catch((e) => { bbS('学习循环异常退出', e); notice('学习出错退出：' + e.message); }); return;   // 不接住的话一个意外错误就会让整个后台崩掉（unhandledRejection → exit）
     }
-    if ((await pw.status()).state === 'off') {
+    const st0 = await pw.status();
+    if (st0.state === 'down') await ensureOllama();   // 学习循环里本来就有这一步，普通聊天之前没有，急停后发「继续」就直接 fetch failed
+    else if (st0.state === 'off') {
       const g = auto.blocking(); if (g) { offerForce(g, mtext); return; }
       bootNotice();
     }
@@ -278,37 +294,84 @@ ${text}` : text;
 }
 
 async function runLearnLoop(firstText) {
-  learn.on = true; learn.stopped = false; learn.round = 0;
+  learn.on = true; learn.stopped = false; learn.inbox = []; learn.yielding = false;
+  learn.round = 0; learn.since = Date.now();
+  saveLearn(true);
   busy = '学习循环'; bc('state', {});
+  // 学习要占用 busy；用户插话、游戏让路时会临时让出，拿回来前等别的事做完
+  const claim = async () => { while (learn.on && busy && busy !== '学习循环') await sleep(500); if (learn.on) { busy = '学习循环'; bc('state', {}); } };
+  // 学到一半检测到游戏：不等这一轮学完，马上打断让出显存
+  const gameWatch = setInterval(() => { if (learn.on && busy === '学习循环' && !learn.yielding && auto.blocking() && !auto.get().forced) { learn.yielding = '检测到游戏在运行，学习这一轮先停下，让出显存。'; core.stop(); } }, 3000);
+  const pause = async (ms) => { for (let i = 0; i < ms / 100 && learn.on && !learn.inbox.length && !learn.yielding; i++) await sleep(100); };
+  core.setLean(true);   // 学习用小上下文 + 狠压缩，给显卡减负（换上下文大小时 Ollama 会重新载入一次模型，约 7 秒）
   try {
-    if ((await pw.status()).state === 'off') bootNotice();
-    let first = true, fails = 0;
+    if (core.ctxUsed() > core.ctxMax() * 0.5) { try { await core.compactNow(); } catch (e) {} }   // 开学前的聊天记录可能比学习用的小上下文还长：先压掉，别让第一轮就被 Ollama 截断
+    let first = true, fails = 0, report = '';
     while (learn.on) {
-      learn.round++;
-      core.resetStop();
-      const prompt = first ? firstText : LEARN_PROMPT();
-      first = false;
-      const before = core.getHistory();
-      let failed = false;
-      try { await core.turn(prompt); fails = 0; } catch (e) { if (e.name !== 'StopError') { failed = true; fails++; notice('学习出错：' + e.message); } }
-      if (!learn.on) break;
-      if (learn.stopped) break;
-      let waitMs = 2000;   // 本轮结束，等 2 秒喘口气再开下一轮（期间说"停止学习"或急停都能打断）
-      if (failed) {
-        // 出错的这一轮没有回答：把它留下的提示词撤掉，否则每次失败都多压一条，下一轮更慢、更容易再超时（10-06 连挂 21 轮就是这样）
-        core.setMessages(before);
-        if (fails >= 3) {   // 连续失败多半是上下文太长、模型处理不动：先压缩；压缩也失败就清空学习上下文（进度都在自学计划和知识库文件里，不会丢）
-          let ok = false;
-          try { ok = (await core.compactNow()) > 0; } catch (e) {}
-          if (!ok) core.setMessages([]);
-          fails = 0;
+      try {
+        // 1. 用户在学习中发了消息：先回答，答完接着学（10-07 用户：不要有任何会打断学习的机制）
+        if (learn.inbox.length) {
+          const m = learn.inbox.shift(); learn.yielding = false;
+          busy = null; bc('state', {});
+          core.setLean(false);   // 回答用户用正常的上下文、系统提示和全部工具
+          try { await doSend(m.text, m.quote, m.att); } finally { if (learn.on) core.setLean(true); }
+          if (!learn.on) break;
+          await claim();
+          continue;
         }
-        waitMs = Math.min(300000, 30000 * Math.max(1, fails));   // 等一会再试，给 Ollama 恢复的时间，别一出错就连环重试
+        // 2. 自动模式检测到游戏：先让出显存（自动下线），游戏关了自动上线后接着学；用户点了「强制上线」就不让
+        const g = auto.blocking();
+        if (g && !auto.get().forced) {
+          learn.yielding = false;
+          busy = null; bc('state', {});
+          while (learn.on && auto.blocking() && !auto.get().forced) await sleep(3000);
+          if (!learn.on) break;
+          await claim();
+          continue;
+        }
+        // 3. Ollama 服务没了（崩了 / 被关了）：重新拉起来再学
+        const st = await pw.status();
+        if (st.state === 'down') await ensureOllama();
+        else if (st.state === 'off') bootNotice();
+
+        learn.round++; saveLearn(true);
+        core.resetStop();
+        const prompt = first ? firstText : LEARN_PROMPT();
+        if (!first) {   // 每轮从干净的上下文开始：上一轮的过程全丢掉，只留它最后那段进度汇报（学了什么、存在哪、下一轮学什么）
+          const n = core.getHistory().filter(isRealUser).length;
+          core.setMessages(report ? [{ role: 'system', summary: true, content: '上一轮学习的进度汇报：\n' + report.slice(0, 1500), archive: [] }] : []);
+          if (n) onEvent('dropped', { users: n });
+        }
+        first = false;
+        const before = core.getHistory();
+        let failed = false;
+        try { const r = await core.turn(prompt, { loop: true }); if (r && r.trim()) report = r.trim(); fails = 0; } catch (e) { if (e.name !== 'StopError') { failed = true; fails++; learn.lastErr = e.message; } }
+        if (!learn.on) break;
+        if (learn.inbox.length || learn.yielding) { learn.yielding = false; continue; }   // 被用户插话 / 游戏打断的这一轮不算出错，先去处理
+        let waitMs = 2000;   // 本轮结束，等 2 秒喘口气再开下一轮（期间说"停止学习"或急停都能打断）
+        if (failed) {
+          // 出错的这一轮没有回答：把它留下的提示词撤掉，否则每次失败都多压一条，下一轮更慢、更容易再超时（10-06 连挂 21 轮就是这样）
+          core.setMessages(before);
+          if (fails >= 3) {   // 连续失败多半是上下文太长、模型处理不动：先压缩；压缩也失败就清空学习上下文（进度都在自学计划和知识库文件里，不会丢）
+            let ok = false;
+            try { ok = (await core.compactNow()) > 0; } catch (e) {}
+            if (!ok) core.setMessages([]);
+            notice('学习连续出错：' + learn.lastErr);   // 只在连续 3 次出错时说一句，单次出错自动重试不提示
+            fails = 0;
+          }
+          waitMs = Math.min(300000, 30000 * Math.max(1, fails));   // 等一会再试，给 Ollama 恢复的时间，别一出错就连环重试
+        }
+        persist();
+        await pause(waitMs);
+      } catch (e) {   // 任何意外都不让循环结束：记下来，歇 1 分钟接着学
+        bbS('学习循环意外出错', e);
+        await pause(60000);
+        if (learn.on && busy !== '学习循环') await claim();
       }
-      for (let i = 0; i < waitMs / 100 && learn.on; i++) await new Promise((r) => setTimeout(r, 100));
     }
   } finally {
-    learn.on = false;
+    clearInterval(gameWatch);
+    learn.on = false; learn.yielding = false; saveLearn(false); core.setLean(false);
     if (busy === '学习循环') busy = null;
     persist(); bc('state', {});
   }
@@ -320,8 +383,7 @@ async function runQueue(items) {
   queue.items = items.map((t, i) => ({ id: i + 1, text: t, status: '等待' })); bc('queue', queue);
   const dir = path.join(core.WS, '任务结果'); fs.mkdirSync(dir, { recursive: true });
   const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
-  notice('任务队列开始（' + items.length + ' 项）。');
-  try {
+    try {
     if ((await pw.status()).state === 'off') bootNotice();
     for (const it of queue.items) {
       if (queue.cancel) { it.status = '已取消'; continue; }
@@ -333,7 +395,7 @@ async function runQueue(items) {
       } catch (e) { it.status = '出错'; }
       bc('queue', queue);
     }
-  } finally { core.setMessages(keep); unattended = false; busy = null; notice('任务队列完成，见「任务结果」。'); bc('state', {}); bc('queue', queue); }
+  } finally { core.setMessages(keep); unattended = false; busy = null; notice('任务队列完成。'); bc('state', {}); bc('queue', queue); }
 }
 
 async function runLeads(opt) {
@@ -384,7 +446,7 @@ async function state() {
   // 模型在显存里就是在线；不在显存里但没人下线过（画图换模型、Ollama 自己卸载），界面照样显示在线，真要用时自动载入
   if (st.state === 'on') userOffline = false;
   else if (st.state === 'off' && !userOffline) st = Object.assign({}, st, { state: 'on', swapped: true });
-  return { cur: cur.id, curTitle: cur.title, ctxUsed: core.ctxUsed(), ctxMax: cfg.numCtx, cmp: (() => { const c = core.compacted(); return c ? { rounds: c.archive.filter((m) => m.role === 'user' && !String(m.content).startsWith('（这是刚才操作后的屏幕截图')).length, summary: c.summary } : null; })(), convs: [...convs.values()].filter((c) => c.id !== cur.id || hasUser()).sort((a, b) => b.updated - a.updated), online: cfg.online, think: cfg.think, desktop: desk.get(), auto: auto.get(), learn: { on: learn.on, round: learn.round }, bar: bar ? { id: bar.id, kind: bar.kind, name: bar.name, text: bar.text } : null, ai: st, busy, wkLabel: busy ? wkLabel : '', busySince: busy === busyKind ? busySince : Date.now(), ws: core.WS, kbDir: cfg.kbDir, queue, pending: [...pending.entries()].map(([id, p]) => ({ id, q: p.q, detail: p.detail })), asks: [...asks.entries()].map(([id, a]) => ({ id, questions: a.questions })), tr: tr.slice(-200), leadLog: leadLog.slice(-200) };
+  return { cur: cur.id, curTitle: cur.title, ctxUsed: core.ctxUsed(), ctxMax: core.ctxMax(), cmp: (() => { const c = core.compacted(); return c ? { rounds: c.archive.filter((m) => m.role === 'user' && !String(m.content).startsWith('（这是刚才操作后的屏幕截图')).length, summary: c.summary } : null; })(), convs: [...convs.values()].filter((c) => c.id !== cur.id || hasUser()).sort((a, b) => b.updated - a.updated), online: cfg.online, think: cfg.think, desktop: desk.get(), auto: auto.get(), learn: { on: learn.on, round: learn.round }, bar: bar ? { id: bar.id, kind: bar.kind, name: bar.name, text: bar.text } : null, ai: st, busy, wkLabel: busy ? wkLabel : '', busySince: busy === busyKind ? busySince : Date.now(), ws: core.WS, kbDir: cfg.kbDir, queue, pending: [...pending.entries()].map(([id, p]) => ({ id, q: p.q, detail: p.detail })), asks: [...asks.entries()].map(([id, a]) => ({ id, questions: a.questions })), tr: tr.slice(-200), leadLog: leadLog.slice(-200) };
 }
 
 // ---------- HTTP ----------
@@ -414,6 +476,13 @@ const server = http.createServer(async (req, res) => {
       const q = (url.searchParams.get('q') || '').trim().toLowerCase(); const ids = [];
       if (q) for (const c of convs.values()) { try { const j = cur && c.id === cur.id ? { tr } : JSON.parse(fs.readFileSync(cfile(c.id), 'utf8')); if ((j.tr || []).some((x) => (x.role === 'user' || x.role === 'ai') && String(x.text || '').toLowerCase().includes(q))) ids.push(c.id); } catch (e) {} }
       return json(res, 200, { ids });
+    }
+    // 10-07 只读查看：AI 忙的时候点历史对话，只把那个对话的记录读给界面看，不切换、不碰正在跑的任务
+    if (req.method === 'GET' && url.pathname === '/api/conv/view') {
+      const id = url.searchParams.get('id') || '';
+      if (!/^c\d+$/.test(id) || !fs.existsSync(cfile(id))) return json(res, 404, { error: '没有这个对话' });
+      try { const j = JSON.parse(fs.readFileSync(cfile(id), 'utf8')); return json(res, 200, { id: j.id, title: j.title, tr: (j.tr || []).slice(-400) }); }
+      catch (e) { return json(res, 500, { error: '读不了这个对话：' + e.message }); }
     }
     if (req.method === 'GET' && url.pathname === '/api/events') {
       res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', Connection: 'keep-alive' });
@@ -446,16 +515,19 @@ const server = http.createServer(async (req, res) => {
         if (busy === '学习循环') {
           const t2 = String(b.text || '').trim();
           if (isStopLearnCmd(t2)) { const um = push({ role: 'user', text: t2, raw: t2 }); bc('user', { text: t2, mid: um.mid }); stopLearn('你说"停止学习"'); return json(res, 200, { ok: true }); }
-          stopLearn('你发了新消息');
-          for (let i = 0; i < 300 && busy === '学习循环'; i++) await new Promise((r) => setTimeout(r, 100));   // 等当前轮真正收尾，再处理这条消息
+          // 10-07：发别的消息不再停学习——学习循环先暂停这一轮、回答这条消息，答完自动接着学
         }
-        if (busy) return json(res, 409, { error: busyMsg('发送新消息') });
+        if (busy && busy !== '学习循环') return json(res, 409, { error: busyMsg('发送新消息') });
         const files = Array.isArray(b.files) ? b.files.slice(0, 8).filter((f) => f && typeof f.b64 === 'string') : [];
         const imgs = Array.isArray(b.imgs) ? b.imgs.slice(0, 4).filter((x) => typeof x === 'string' && x.length < 12e6) : [];
         const text = String(b.text || '').trim() || (files.length ? '请看我附上的文件。' : ''); if (!text) return json(res, 400, { error: '空消息' });
         const q = b.quote && typeof b.quote.text === 'string' && b.quote.text.trim() ? { who: b.quote.who === 'ai' ? 'ai' : 'user', text: b.quote.text.trim().slice(0, 500) } : null;
         const inboxDir = path.join(core.WS, '收件') + path.sep;
         const reuse = Array.isArray(b.reuse) ? b.reuse.filter((p) => typeof p === 'string' && path.resolve(p).startsWith(inboxDir) && fs.existsSync(p)).slice(0, 8) : [];
+        if (busy === '学习循环') {   // 交给学习循环：打断当前这一轮，先回答这条，再接着学
+          learn.inbox.push({ text, quote: q, att: { files, imgs, reuse } }); learn.yielding = true;
+          core.stop(); skipAsks(); return json(res, 200, { ok: true });
+        }
         doSend(text, q, { files, imgs, reuse }); return json(res, 200, { ok: true });
       }
       if (url.pathname === '/api/answer') {   // 选择题的回答：answers = { 问题: 答案 }；skip = 跳过
@@ -493,14 +565,14 @@ const server = http.createServer(async (req, res) => {
       if (url.pathname === '/api/settings') {
         if (typeof b.online === 'boolean') cfg.online = b.online;
         if (typeof b.think === 'boolean') cfg.think = b.think;
-        if (typeof b.auto === 'boolean') { auto.set(b.auto); notice(b.auto ? '自动模式已开。' : '自动模式已关。'); }
+        if (typeof b.auto === 'boolean') { auto.set(b.auto); }   // 开关本身看得到状态，不另外提示
         if (typeof b.desktop === 'boolean') desk.set(b.desktop);   // 开关本身在界面上看得到，不再往对话里插提示
         bc('state', {}); return json(res, 200, { ok: true });
       }
       if (url.pathname === '/api/conv/new' || url.pathname === '/api/conv/open' || url.pathname === '/api/conv/delete') {
         const act = url.pathname.split('/').pop(), id = String(b.id || '');
-        // 删的是别的对话（不是正在干活的这个）只动磁盘文件，不碰当前会话，忙的时候也放行
-        if (busy && !(act === 'delete' && cur && cur.id !== id)) return json(res, 409, { error: busyMsg(act === 'delete' ? '删除这个对话' : act === 'new' ? '新建对话' : '切换到别的对话') });
+        // 删的是别的对话（不是正在干活的这个）只动磁盘文件，不碰当前会话，忙的时候也放行；「打开」的就是当前对话等于什么都不做，也放行
+        if (busy && !(act === 'delete' && cur && cur.id !== id) && !(act === 'open' && cur && cur.id === id)) return json(res, 409, { error: busyMsg(act === 'delete' ? '删除这个对话' : act === 'new' ? '新建对话' : '切换到别的对话') });
         if (act === 'new') { persist(); newConv(); }
         else if (!/^c\d+$/.test(id) || (!convs.has(id) && !(cur && cur.id === id))) return json(res, 404, { error: '没有这个对话' });
         else if (act === 'open') { if (cur.id !== id) openConv(id); }
@@ -564,7 +636,7 @@ const server = http.createServer(async (req, res) => {
         const c = bar; bar = null; bc('bar', {}); bc('state', {});
         if (b.key === 'notgame') { const r = await auto.notGame(c.name); if (!r.ok) notice(r.text); return json(res, 200, r); }
         if (b.key === 'ack') return json(res, 200, { ok: true });
-        if (b.key !== 'force') { notice('已取消。'); return json(res, 200, { ok: true }); }
+        if (b.key !== 'force') { return json(res, 200, { ok: true }); }
         if (busy) { notice(busyDoing() + '，稍后再试。'); return json(res, 409, { error: busyMsg('强制上线') }); }
         busy = 'AI 上线/下线'; bc('state', {});
         let r; try { r = await pw.on(); if (!r.ok) notice(r.text); if (r.ok) auto.forceOn(); } finally { busy = null; bc('state', {}); }

@@ -202,6 +202,10 @@ textarea{width:100%;padding:10px 12px;border:1px solid var(--line2);border-radiu
 .confirm b{color:var(--warn)}
 .confirm pre{margin:8px 0;padding:10px 12px;background:var(--bg);border-radius:8px;font-family:var(--mono);font-size:var(--f1);white-space:pre-wrap;word-break:break-all;max-height:200px;overflow:auto}
 .confirm .acts{display:flex;gap:10px;margin-top:10px}
+.confirm .ci{margin-top:6px}
+.confirm pre.cq{max-height:calc(4.5em + 20px);overflow:hidden;cursor:pointer;margin:4px 0 0}
+.confirm pre.cq.open{max-height:200px;overflow:auto}
+.confirm details summary{cursor:pointer;color:var(--mute);font-size:var(--f1)}
 
 /* AI 提的选择题：跟「需要你确认」同一张卡；选项一行一个，数字键可选 */
 .askq{margin-bottom:10px;background:var(--side);border-radius:var(--r);padding:14px 16px;outline:0}
@@ -413,6 +417,10 @@ header .stop.stopping.slow{animation:stopSlow .7s ease-in-out infinite}
 .confirm b{color:var(--ink);font-weight:500}
 .confirm b::before{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;background:#e5483d;margin-right:8px;vertical-align:1px}
 #choiceBar{border-bottom:0;background:rgba(200,55,45,.20)}
+/* 10-07 只读查看：AI 忙时点历史对话，上方一条提示；查看中不显示撤回、重新回答 */
+#peekBar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 24px;font-size:var(--f2);background:rgba(127,127,127,.14)}
+#peekBar #peekText{flex:1;min-width:200px}
+#chat.peek .ma.ed,#chat.peek .ma.rt{display:none}
 .inp,textarea{border:0;background:rgba(255,255,255,.07)}
 .inp:focus,textarea:focus{background:rgba(255,255,255,.11)}
 .cbpop{display:none;position:absolute;left:0;top:100%;margin-top:4px;min-width:100%;max-height:260px;overflow:auto;background:var(--bg);border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.45);padding:4px;z-index:60;white-space:nowrap}
@@ -454,7 +462,7 @@ button,nav a,.cv,.sw,.ma,.send,.plus,.chip,.ghost{transition:background-color .1
 .send.idle{opacity:.5}
 .send.ready{background:var(--accent);color:var(--accent-ink);opacity:1}
 .send.ready:hover{background:#fff}
-.send.stopmode{background:rgba(255,255,255,.16);color:var(--ink);opacity:1}
+.send.stopmode{background:rgba(255,255,255,.16);color:#c8372d;opacity:1}
 .send:active{transform:scale(.92)}
 .ma:active,.cbox .cp:active,.sw:active,.chip:active{transform:scale(.96)}
 :focus-visible{outline:1px solid rgba(255,255,255,.5);outline-offset:1px}
@@ -520,7 +528,6 @@ html.loading body{visibility:hidden}
   <span class="grow"></span>
   
     <button class="ic" id="gear" title="设置"><svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" style="transform:translateX(2px)"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg></button>
-  <button class="stop" id="stopBtn">STOP</button>
   <span id="wbtns"><button id="wMin" aria-label="最小化"><svg viewBox="0 0 10 10"><path d="M0 5.5h10"/></svg></button><button id="wMax" aria-label="最大化"><svg class="mx" viewBox="0 0 10 10"><rect x=".5" y=".5" width="9" height="9" rx="1"/></svg><svg class="rs" viewBox="0 0 10 10"><rect x=".5" y="2.5" width="7" height="7" rx="1"/><path d="M2.5 2.5V1.5a1 1 0 0 1 1-1h5a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1h-1"/></svg></button><button id="wClose" aria-label="关闭"><svg viewBox="0 0 10 10"><path d="M.5 .5l9 9M9.5 .5l-9 9"/></svg></button></span>
   <div class="pop" id="pop"><button class="btn" id="aiBtn" disabled><span class="l">AI 已离线</span><b class="tg"><i></i></b></button><hr class="psep"><label class="sw" id="swNet" title="打开后 AI 才能上网搜索、读网页、做线索挖掘"><span>联网：关</span><b class="tg"><i></i></b></label>
           <label class="sw" id="swDesk" title="打开后 AI 才能看屏幕、动鼠标键盘。默认关。"><span>桌面：关</span><b class="tg"><i></i></b></label>
@@ -531,6 +538,7 @@ html.loading body{visibility:hidden}
   <div id="choiceBar" style="display:none"><span id="choiceText"></span><button class="btn stop" id="choiceForce">强制上线</button><button class="btn" id="choiceNot">这不是游戏</button><button class="btn" id="choiceCancel">取消（游戏关闭后自动上线）</button><button class="btn" id="choiceAck">知道了</button></div>
   <section class="page on" id="p-chat">
     <div id="gbar"><span id="gpuT"></span><span id="memT"></span><span id="actT"></span></div>
+    <div id="peekBar" style="display:none"><span id="peekText"></span><button class="btn pri" id="peekGo" style="display:none">在这里继续聊</button><button class="btn" id="peekBack">回到当前任务</button></div>
     <div id="chat"></div>
     <div class="composer">
       <button id="toBottom" type="button" title="回到最新">↓</button>
@@ -740,14 +748,14 @@ let convHits = new Set(), convQv = '';   // 搜索框里的字，和服务器按
 }); }
 function paintConvs() {
   const all = S.convs || [], list = convQv ? all.filter((c) => String(c.title || '').toLowerCase().includes(convQv) || convHits.has(c.id)) : all;
-  const t = page === 'chat' ? (hasMsgs() && S.curTitle ? S.curTitle : '新对话') : ({ queue: '任务队列', leads: '线索挖掘', files: '文件' }[page]);
+  const t = page === 'chat' ? (peek ? peek.title + '（只读查看）' : hasMsgs() && S.curTitle ? S.curTitle : '新对话') : ({ queue: '任务队列', leads: '线索挖掘', files: '文件' }[page]);
   document.querySelector('header .title').textContent = t;
   document.getElementById('newConvBtn').classList.toggle('on', page === 'chat' && !hasMsgs());
-  const key = JSON.stringify([list, S.cur, page, hasMsgs(), convQv]); if (key === convKey) return; convKey = key;
+  const key = JSON.stringify([list, S.cur, page, hasMsgs(), convQv, peek && peek.id]); if (key === convKey) return; convKey = key;
   const box = $('#convList'); box.innerHTML = '';
   if (!list.length) { box.innerHTML = '<div class="hint" style="padding:6px 14px">' + (convQv ? '没有找到' : '还没有历史对话') + '</div>'; return; }
   list.forEach((c) => {
-    const d = h('div', 'cv' + (page === 'chat' && c.id === S.cur ? ' on' : ''), '<span class="t"></span><button class="x" title="删除这个对话">×</button>');
+    const d = h('div', 'cv' + (page === 'chat' && c.id === (peek ? peek.id : S.cur) ? ' on' : ''), '<span class="t"></span><button class="x" title="删除这个对话">×</button>');
     d.querySelector('.t').textContent = c.title || '新对话'; d.title = c.title || '';
     d._conv = c; d.onclick = () => openConv(c.id);
     d.querySelector('.x').onclick = (e) => { e.stopPropagation(); delConv(c); };
@@ -755,10 +763,42 @@ function paintConvs() {
   });
 }
 async function convCall(p, id) { try { await api('/api/conv/' + p, { id }); } catch (e) { uiAlert(e.message); return false; } await refresh(); return true; }
-async function newConv() { showPage('chat'); if (!(await convCall('new'))) return; $('#inp').focus(); }
-async function openConv(id) { if (page === 'chat' && id === S.cur) return; showPage('chat'); await convCall('open', id); }
-async function delConv(c) { if (!(await uiConfirm('删除对话「' + (c.title || '新对话') + '」？删除后不能恢复。', true))) return; await convCall('delete', c.id); }
+async function newConv() { showPage('chat'); if (peek && !S.busy) endPeek(true); if (!(await convCall('new'))) return; $('#inp').focus(); }
+async function openConv(id) {
+  if (peek && id === S.cur) { showPage('chat'); return endPeek(); }
+  if (id === S.cur && !peek) { if (page !== 'chat') showPage('chat'); return; }   // 点的就是当前对话（比如从文件页回来）只切页面，不打后端，忙的时候也不会被挡
+  showPage('chat');
+  if (S.busy && id !== S.cur) return peekConv(id);   // 10-07 AI 正忙：不切换，只读查看
+  if (peek) endPeek(true);
+  await convCall('open', id);
+}
+// ---------- 只读查看（10-07）：AI 在别的对话里干活时，点历史对话只看不切换，正在跑的任务不受影响 ----------
+let peek = null;   // { id, title }
+async function peekConv(id) {
+  let r; try { r = await api('/api/conv/view?id=' + encodeURIComponent(id)); } catch (e) { uiAlert(e.message); return; }
+  peek = { id: r.id, title: r.title || '新对话' };
+  closeLive(); const w = document.getElementById('wk'); if (w) w.remove();
+  chat.classList.add('peek'); chat.innerHTML = ''; $('#actT').textContent = '';
+  window.__loadingChat = true;
+  (r.tr || []).forEach((it) => { if (it.role === 'confirm' && !it.answered) it = { ...it, answered: '已过期' }; if (it.role === 'ask' && !it.answered) return; add(it); });
+  window.__loadingChat = false;
+  chat.scrollTop = chat.scrollHeight; paintPeek(); convKey = ''; paintConvs();
+}
+async function endPeek(quiet) {
+  if (!peek) return; peek = null; chat.classList.remove('peek'); paintPeek(); convKey = '';
+  if (quiet) return;
+  await refresh(); loadChat();
+}
+function paintPeek() {
+  const b = $('#peekBar'); b.style.display = peek ? 'flex' : 'none'; if (!peek) return;
+  $('#peekText').textContent = S.busy ? '只读查看「' + peek.title + '」。AI 正在当前任务里忙（' + S.busy + '），做完后才能在这个对话里继续聊；正在跑的任务不受影响。' : '只读查看「' + peek.title + '」。AI 已经空下来了，可以切换到这个对话接着聊。';
+  $('#peekGo').style.display = S.busy ? 'none' : '';
+}
+$('#peekBack').onclick = () => endPeek();
+$('#peekGo').onclick = async () => { const id = peek && peek.id; if (!id) return; endPeek(true); if (!(await convCall('open', id))) { await refresh(); loadChat(); } };
+async function delConv(c) { if (!(await uiConfirm('删除对话「' + (c.title || '新对话') + '」？删除后不能恢复。', true))) return; if (peek && peek.id === c.id) await endPeek(); await convCall('delete', c.id); }
 function loadChat() {
+  if (peek) return;   // 只读查看中：别把当前任务的记录画进来，回到当前任务时再画
   chat.innerHTML = ''; $('#actT').textContent = ''; window.__loadingChat = true; (S.tr || []).forEach(add); window.__loadingChat = false;
   (S.pending || []).forEach((p) => { if (!chat.querySelector('.confirm[data-cid="' + p.id + '"]')) add({ role: 'confirm', id: p.id, q: p.q, detail: p.detail }); });
   chat.scrollTop = chat.scrollHeight; paintConvs(); if (typeof gpuPaint === 'function') gpuPaint();
@@ -777,10 +817,7 @@ function paint() {
   $('#swNet').classList.toggle('on', S.online); $('#swNet span').textContent = '联网';
   $('#swDesk').classList.toggle('on', S.desktop); $('#swDesk span').textContent = '桌面';
   $('#swThink').classList.toggle('on', S.think); $('#swThink span').textContent = '思考';
-  paintConvs();
-  const live = (st === 'on' && !booting) || (!!S.busy && S.busy !== 'AI 上线/下线');
-  $('#stopBtn').classList.toggle('idle', !live);
-  if (!S.busy) { clearTimeout(stopSlowT); $('#stopBtn').classList.remove('stopping', 'slow'); }
+  paintConvs(); paintPeek();
   $('#status').textContent = '';
   $('#sendBtn').disabled = !!S.busy && S.busy !== '对话' && S.busy !== '学习循环'; $('#qGo').disabled = !!S.busy; $('#lGo').disabled = !!S.busy; $('#lStop').disabled = S.busy !== '线索挖掘';
   $('#foot').innerHTML = '<svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>' + esc(S.ws || ''); $('#foot').title = '工作文件夹：' + (S.ws || '');
@@ -794,8 +831,8 @@ $('#swAuto').onclick = async () => { await api('/api/settings', { auto: !(S.auto
 $('#swNet').onclick = async () => { await api('/api/settings', { online: !S.online }); refresh(); };
 $('#swDesk').onclick = async () => { await api('/api/settings', { desktop: !S.desktop }); refresh(); };
 $('#swThink').onclick = async () => { await api('/api/settings', { think: !S.think }); refresh(); };
-let stopSlowT = 0;
-$('#stopBtn').onclick = () => { const b = $('#stopBtn'); if (b.classList.contains('idle')) return; if (S.busy) { b.classList.add('stopping'); clearTimeout(stopSlowT); stopSlowT = setTimeout(() => b.classList.add('slow'), 10000); } api('/api/stop', {}).then(() => refresh()); };
+// 急停（右上角 STOP 已删，改由输入框急停键 / Esc 触发）
+function stopNow() { api('/api/stop', {}).then(() => refresh()); }
 
 // ---------- 对话 ----------
 const chat = $('#chat');
@@ -899,10 +936,23 @@ chat.addEventListener('mousemove', (e) => {
 chat.addEventListener('scroll', hideAiLine);
 chat.addEventListener('mouseleave', hideAiLine);
 function h(tag, cls, html) { const e = document.createElement(tag); e.className = cls; e.innerHTML = html; return e; }
+// 确认框（2026-10-07 精简）：每项一行短标题；命令原文只显示一次、超过 3 行折起来（点一下展开）；写文件的内容默认收起；不再重复显示路径和目录
+function confirmItem(q, d) {
+  q = String(q || ''); d = d || {};
+  const isCmd = d.kind === 'command' && /^运行命令/.test(q);
+  const head = isCmd ? '运行命令' + (q.match(/（在 .+ 里运行）|（后台运行，不等结果）/g) || []).join('') : q.split('\n')[0];
+  const body = isCmd ? `<pre class="cq" title="点一下展开/收起">${esc(d.command || '')}</pre>` : d.kind === 'write' && d.preview ? `<details><summary>看内容</summary><pre>${esc(d.preview)}</pre></details>` : '';
+  return `<div class="ci"><span${d.path ? ' title="' + esc(d.path) + '"' : ''}>${esc(head)}</span>${body}</div>`;
+}
 function confirmEl(it) {
   const d = it.detail || {};
-  const body = d.kind === 'command' ? `在：${esc(d.cwd)}` : d.kind === 'write' ? `文件：${esc(d.path)}<pre>${esc(d.preview || '')}</pre>` : d.path ? esc(d.path) : '';
-  const e = h('div', 'confirm', `<b>需要你确认</b>　${esc(it.q)}${body ? '<div>' + body + '</div>' : ''}<div class="acts">${it.answered ? '<span class="hint">' + esc(it.answered) + '</span>' : '<button class="btn pri" data-ok="1">同意</button>' + (d.kind === 'delete' ? '' : '<button class="btn" data-ok="1" data-all="1" title="这一轮任务里后面的写文件、改文件、命令都不再问；删除和危险命令仍会单独问">本次任务全部同意</button>') + '<button class="btn" data-ok="0">拒绝</button>'}</div>`);
+  const items = d.kind === 'batch' ? d.items || [] : [{ q: it.q, detail: d }];
+  const hasDel = items.some((x) => x.detail && x.detail.kind === 'delete');
+  const dels = items.length > 1 ? items.filter((x) => x.detail && x.detail.kind === 'delete') : [];   // 好几个删除并成一行：移入回收站：a、b、c
+  const lines = (dels.length > 1 ? items.filter((x) => !dels.includes(x)) : items).map((x) => confirmItem(x.q, x.detail));
+  if (dels.length > 1) lines.unshift(`<div class="ci">移入回收站：${dels.map((x) => '<span title="' + esc(x.detail.path || '') + '">' + esc(String(x.q).replace(/^把 (.+) 移入回收站$/, '$1')) + '</span>').join('、')}</div>`);
+  const e = h('div', 'confirm', `<b>需要你确认${items.length > 1 ? '（' + items.length + ' 项）' : ''}</b>${lines.join('')}<div class="acts">${it.answered ? '<span class="hint">' + esc(it.answered) + '</span>' : '<button class="btn pri" data-ok="1">' + (items.length > 1 ? '全部同意' : '同意') + '</button>' + (hasDel ? '' : '<button class="btn" data-ok="1" data-all="1" title="这一轮任务里后面的写文件、改文件、命令都不再问；删除和危险命令仍会单独问">本次任务全部同意</button>') + '<button class="btn" data-ok="0">拒绝</button>'}</div>`);
+  e.querySelectorAll('pre.cq').forEach((p) => p.onclick = () => p.classList.toggle('open'));
   e.dataset.cid = it.id;
   e.querySelectorAll('button').forEach((b) => b.onclick = () => api('/api/confirm', { id: it.id, ok: b.dataset.ok === '1', all: b.dataset.all === '1' }).catch((er) => { const a = e.querySelector('.acts'); if (a) a.innerHTML = '<span class="hint">没点成功：' + esc(String(er.message || er)) + '（这条可能已过期，让 AI 重做一遍）</span>'; }));
   return e;
@@ -1046,6 +1096,7 @@ document.addEventListener('drop', (e) => { if (e.dataTransfer && e.dataTransfer.
 async function send() {
   const t = $('#inp').value.trim(); if ((!t && !atts.length) || (S.busy && S.busy !== '对话' && S.busy !== '学习循环')) return;
   hPush(t);
+  if (peek) await endPeek();   // 只读查看中发消息：先回到当前任务，消息发到正在干活的那个对话
   const files = atts.splice(0); paintAtts();
   $('#inp').value = ''; grow(); try { localStorage.removeItem('inpDraft'); } catch (e) {} const q = quoted; setQuote(null);
   try { await api('/api/send', { text: t, quote: q, files: files.map((a) => ({ name: a.name, b64: a.b64 })), imgs: files.map((a) => a.img).filter(Boolean) }); }
@@ -1118,6 +1169,7 @@ let wkCyc = -1, wkCur = 0, wkNxt = 1, wkGA = null, wkGB = null;
 const wk = { t0: 0, last: 0, label: '' };
 setInterval(() => {
   let el = document.getElementById('wk');
+  if (peek) { if (el) el.remove(); return; }   // 只读查看中不显示当前任务的进度动画
   if (!S.busy) { wk.t0 = 0; wk.kind = ''; if (el) el.remove(); return; }
   if (!wk.t0 || wk.kind !== S.busy) { wk.t0 = wk.last = Date.now(); if (S.busySince && S.busySince <= wk.t0) wk.t0 = S.busySince; wk.label = ''; wk.kind = S.busy; if (S.busySince && Date.now() - S.busySince > 2000) wk.last = Date.now() - 2000; }   // 刷新页面时 AI 早就在忙：别再藏 1.5 秒   // 任何要长时间运算的活（对话、任务队列、线索挖掘、上线下线）都显示
   if (!el) el = h('div', '', '<i></i><span></span><b></b>'), el.id = 'wk', wkBalls(el.firstChild);
@@ -1398,6 +1450,9 @@ async function view(d, n) { const r = await api('/api/file?dir=' + encodeURIComp
 // ---------- 事件流 ----------
 function connect() {
   const es = new EventSource('/api/events');
+  // 只读查看中：当前任务的实时内容先不往屏幕上画（服务器都记着），回到当前任务时一次画全
+  { const PEEK_SKIP = new Set(['token', 'user', 'tool', 'toolresult', 'notice', 'noticeupd', 'error', 'stopped', 'done', 'confirm', 'ask', 'ask_done', 'confirm_done', 'cleared', 'conv', 'shot']);
+    const al = es.addEventListener.bind(es); es.addEventListener = (t, f) => al(t, (e) => { if (peek && PEEK_SKIP.has(t)) { if (t === 'done' || t === 'stopped' || t === 'conv') refresh(); return; } f(e); }); }
   es.addEventListener('token', (e) => { $('#actT').textContent = ''; const d = JSON.parse(e.data); liveAI(d.text, d.mid); });
   es.addEventListener('user', (e) => { closeLive(); add(Object.assign({ role: 'user' }, JSON.parse(e.data))); });
   es.addEventListener('tool', (e) => { $('#actT').textContent = ''; closeLive(); add(Object.assign({ role: 'tool' }, JSON.parse(e.data))); });
@@ -1468,19 +1523,19 @@ const STOP_SVG = '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="7" y="7"
 // 发送键：空着是暗的，有字或有附件变成实心；AI 正在回答、输入框又是空的，就变成「停止」
 function sendUi() {
   const b = $('#sendBtn'); if (!b) return;
-  const has = !!(inpEl.value.trim() || atts.length), stop = !has && S.busy === '对话';
+  const has = !!(inpEl.value.trim() || atts.length), stop = !has && (S.busy === '对话' || S.busy === '学习循环');
   b.classList.toggle('ready', has); b.classList.toggle('stopmode', stop); b.classList.toggle('idle', !has && !stop);
   const k = stop ? 1 : 0; if (b._k !== k) { b._k = k; b.innerHTML = stop ? STOP_SVG : UP_SVG; b.title = stop ? '停止（Esc）' : '发送（Enter）'; }
 }
 inpEl.addEventListener('input', sendUi); setInterval(sendUi, 250); sendUi();
-$('#sendBtn').onclick = () => { if ($('#sendBtn').classList.contains('stopmode')) $('#stopBtn').click(); else send(); };
+$('#sendBtn').onclick = () => { if ($('#sendBtn').classList.contains('stopmode')) stopNow(); else send(); };
 // 点输入框里的空白处也进输入框
 $('.composer .box').addEventListener('mousedown', (e) => { if (e.target.closest('button,textarea,.plus')) return; e.preventDefault(); inpEl.focus(); });
 // Esc：AI 在回答时按一下就停（有弹窗、右键菜单、放大图开着的时候先关它们）
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape' || e.isComposing || e.defaultPrevented) return;
   if (document.querySelector('.dlgmask,.lbx') || ctx.style.display === 'block' || (e.target && e.target.id === 'convQ') || (e.target && e.target.classList && e.target.classList.contains('cvedit'))) return;
-  if ((S.busy === '对话' || S.busy === '学习循环') && page === 'chat') { e.preventDefault(); $('#stopBtn').click(); }
+  if ((S.busy === '对话' || S.busy === '学习循环') && page === 'chat') { e.preventDefault(); stopNow(); }
 }, true);
 // 文件拖进窗口时整个窗口提示「松手」
 { const v = document.createElement('div'); v.id = 'dropv'; v.textContent = '松手，把文件交给 AI'; document.body.appendChild(v);

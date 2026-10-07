@@ -8,6 +8,8 @@
   "online": true,
   "think": true,
   "numCtx": 32768,
+  "learnCtx": 8192,
+  "learnThink": false,
   "maxSteps": 60000,
   "proxy": "",
   "proxyFallback": "http://127.0.0.1:10808",
