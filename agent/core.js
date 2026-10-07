@@ -518,7 +518,13 @@ ${learnTodo()}
   let lastUsed = 0, subDenied = false;
   // 学习模式（学习循环开着时）：上下文开小一点（learnCtx，默认 16384），KV 缓存的显存只要平时的一半；默认不思考（learnThink）；压缩也更狠——学习的过程记录用户不翻，进度都在文件里
   let lean = false;
-  const ctxN = () => (lean ? cfg.learnCtx || 16384 : cfg.numCtx);
+  // 聊天至少 64K（10-07：32K 装不下「聊天记录 + 工具结果 + 上万字的思考」，模型想到一半空间用光，交了白卷）。显卡 24G，64K 的缓存约多占 1~2G，装得下
+  const ctxN = () => (lean ? cfg.learnCtx || 16384 : Math.max(cfg.numCtx || 0, cfg.numCtxMin || 65536));
+  // 估算发给模型的内容有多少词元：中文约 1 字 1 个，其余约 3.5 字符 1 个（Ollama 回报的用量在有缓存时会偏少，不能只靠它）
+  const estTok = (x) => { const t = typeof x === 'string' ? x : JSON.stringify(x); const cjk = (t.match(/[\u3000-\u9fff\uff00-\uffef]/g) || []).length; return Math.round(cjk + (t.length - cjk) / 3.5); };
+  const promptTok = (noTools) => estTok(sendMsgs()) + (noTools ? 0 : estTok(allTools()));
+  // 给这一步的思考和答复留的位置：聊天开思考留 12K，不开留 4K
+  const reserveTok = (think) => (lean ? 0 : think ? cfg.thinkReserve || 12288 : 4096);   // 学习模式本来就限了一次最多写 4096，不另留
   const LEAN_RES = 2000;   // 学习模式：单个工具结果最多给多少字
   const realUser = (m) => m.role === 'user' && !String(m.content).startsWith('（这是刚才操作后的屏幕截图');
   const isSummary = (m) => m.role === 'system' && m.summary;
@@ -605,7 +611,7 @@ ${learnTodo()}
   const hm = () => { const d = new Date(); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
   const reportLine = (t, opts) => (opts.round ? `第 ${opts.round} 轮 ${hm()}｜` : '') + shortReport(t);
   let quietTok = false, quietAt = 0;   // 学习时：中间步骤（带工具调用的）说的话不上屏，只显示最后那行汇报（10-07：模型老在调用工具前说 "Let me write…"）
-  async function chatOnce(extraOpts, noTools) {
+  async function chatOnce(extraOpts, noTools, forceNoThink) {
     abortCtl = new AbortController();
     let stalled = '', stallT; const arm = (ms, kind) => { clearTimeout(stallT); stallT = setTimeout(() => { stalled = kind || 'mid'; abortCtl.abort(); }, ms); };   // 等第一个字最多 5 分钟（冷启动加载大模型要久），出字以后 2 分钟没动静就当它挂了
     // 学习模式：单次回答最多 8 分钟，到点就中断，这一步算失败、自动重试（10-07：一次回答卡了 600 多秒，显卡 100% GPU，是模型在一直往下写停不下来）
@@ -615,7 +621,7 @@ ${learnTodo()}
     let capT = null;
     const bail = (kind) => { stalled = kind; abortCtl.abort(); };
     // 10-07 用户：光兜住不算解决。模型想进死循环（同一段话反复想）或想得太长时，不报错，而是关掉「思考」让它这一步直接回答，活接着干
-    for (let noThink = false; ; noThink = true) {
+    for (let noThink = !!forceNoThink; ; noThink = true) {
       clearTimeout(capT); capT = setTimeout(() => bail('cap'), capMin * 60000);
       try { arm(300000, 'start'); return await chatOnceRun(extraOpts, lean ? () => clearTimeout(stallT) : (ms) => arm(ms), noTools, noThink, bail); }
       catch (e) {
@@ -636,7 +642,11 @@ ${learnTodo()}
   // 量化过的 Qwen 在这种设置下容易在思考里绕圈子。官方：思考 0.6/0.95/20，不思考 0.7/0.8/20，量化模型加 presence_penalty 1.5 防复读。config 里可改。
   const sampling = (think) => ({ temperature: think ? 0.6 : 0.7, top_p: think ? 0.95 : 0.8, top_k: 20, min_p: 0, presence_penalty: cfg.presencePenalty ?? 1.5, ...(cfg.sampling || {}) });
   async function chatOnceRun(extraOpts, arm, noTools, noThink, bail) {
-    const body = { model: cfg.model, messages: sendMsgs(), ...(noTools ? {} : { tools: allTools() }), stream: true, think: noThink ? false : lean ? !!cfg.learnThink : cfg.think, keep_alive: -1, options: { num_ctx: ctxN(), ...sampling(noThink ? false : lean ? !!cfg.learnThink : cfg.think), ...(lean ? { num_predict: cfg.learnPredict || 4096 } : {}), ...(extraOpts || {}) } };   // 学习时一次最多写 4096 个词元，防止模型复读停不下来
+    const body = { model: cfg.model, messages: sendMsgs(), ...(noTools ? {} : { tools: allTools() }), stream: true, think: noThink ? false : lean ? !!cfg.learnThink : cfg.think, keep_alive: -1, options: { num_ctx: ctxN(), ...sampling(noThink ? false : lean ? !!cfg.learnThink : cfg.think), ...(lean ? { num_predict: cfg.learnPredict || 4096 } : {}), ...(extraOpts || {}) } };
+    // 按剩下的空间限制这一步最多写多少（思考 + 答复）：写满了 Ollama 会直接停，不会把前面的内容挤掉；再给思考单独设上限，保证留出写答复的位置
+    const room = Math.max(512, ctxN() - estTok(body.messages) - (body.tools ? estTok(body.tools) : 0) - 256);
+    body.options.num_predict = Math.min(body.options.num_predict || room, room);
+    const thinkRoom = Math.max(0, room - 2048);   // 至少留 2K 词元写答复   // 学习时一次最多写 4096 个词元，防止模型复读停不下来
     let r;
     for (let tryN = 0; ; tryN++) {   // Ollama 推理进程偶尔崩一下（500 / 连不上），自己会重启：等几秒重试一次，别让用户重发
       try { r = await fetch(cfg.ollama + '/api/chat', { method: 'POST', signal: abortCtl.signal, body: JSON.stringify(body) }); }
@@ -652,7 +662,7 @@ ${learnTodo()}
     }
     if (!r.ok) throw new Error('Ollama 返回 ' + r.status + ': ' + (await r.text()).slice(0, 200));
     let content = '', calls = [], buf = '', thinking = false, stats = null, thinkN = 0, thinkTxt = '', checkedAt = 0; const dec = new TextDecoder();
-    const THINK_MAX = cfg.thinkMaxChars || 20000;   // 一步最多想这么多字（38 词元/秒下约两三分钟），再多基本是在绕圈子
+    const THINK_MAX = Math.min(cfg.thinkMaxChars || 20000, thinkRoom * 3);   // 一步最多想这么多字（38 词元/秒下约两三分钟），再多基本是在绕圈子
     for await (const chunk of r.body) {
       arm(120000); buf += dec.decode(chunk, { stream: true }); let i;
       while ((i = buf.indexOf('\n')) >= 0) {
@@ -726,13 +736,26 @@ ${learnTodo()}
     try {
       const stepCap = opts.loop ? cfg.learnSteps || 40 : cfg.maxSteps;   // 学习一轮最多 40 步就收尾进下一轮，别一轮跑几百步、反复压缩（10-07）
       for (let step = 0; step < stepCap; step++) {
-        checkStop(); trimHistory(); await compact(); checkStop();
+        checkStop(); trimHistory();
+        // 调模型前先算够空间：现在的内容 + 给思考和答复留的位置，超了就先压缩（不再只看上一次的用量——新加进来的工具结果算不进去，10-07 18:24 就是这样装满的）
+        const thinkOn = lean ? !!cfg.learnThink : !!cfg.think;
+        lastUsed = Math.max(lastUsed, promptTok(denied) + reserveTok(thinkOn));
+        await compact(); checkStop();
         if (opts.loop) emit('step', { step: step + 1 });
-        log('llm', { step: step + 1, ctx: lastUsed || undefined });   // 每次调模型前记一笔：日志停在这里 = 卡在等模型（10-07 18:24 之后 21 分钟没日志，分不清卡在哪）
-        const { content, calls, stats, thinkN } = await chatOnce(undefined, denied);   // 用户拒绝过：这一轮不给工具，只许说话，不准换办法绕
-        if (stats && stats.prompt_eval_count) lastUsed = stats.prompt_eval_count + (stats.eval_count || 0);
+        log('llm', { step: step + 1, est: promptTok(denied), ctx: ctxN() });   // 每次调模型前记一笔：日志停在这里 = 卡在等模型
+        let { content, calls, stats, thinkN } = await chatOnce(undefined, denied);   // 用户拒绝过：这一轮不给工具，只许说话，不准换办法绕
+        // 交了白卷（没写字也没调工具）：多半是想到一半空间用完了。先关掉思考重答；还空就把旧记录全压成摘要再答；再空才告诉用户
+        for (let k = 0; !content.trim() && !calls.length && k < 2; k++) {
+          log('empty_reply', { reason: stats && stats.done_reason, used: stats && stats.prompt_eval_count, gen: stats && stats.eval_count, thinkChars: thinkN, retry: k + 1 });
+          checkStop();
+          if (k === 1) await compact(true);
+          emit('thinking', { text: k ? '内容太多，压缩后再答' : '没写出答复，改成直接回答' });
+          ({ content, calls, stats, thinkN } = await chatOnce(undefined, denied, true));
+        }
+        if (!content.trim() && !calls.length) throw new Error('模型连着几次没写出答复（这次要看的内容太多，装不下）。可以点「重试」，或开个新对话、把问题拆小一点再问。');
+        lastUsed = (stats && stats.prompt_eval_count ? stats.prompt_eval_count + (stats.eval_count || 0) : 0);
         messages.push({ role: 'assistant', content, ...(calls.length && !denied ? { tool_calls: calls } : {}) });
-        log('assistant', { text: content, calls: calls.map((c) => c.function), ...(thinkN ? { thinkChars: thinkN } : {}) });
+        log('assistant', { text: content, calls: calls.map((c) => c.function), ...(thinkN ? { thinkChars: thinkN } : {}), ...(stats ? { reason: stats.done_reason, used: stats.prompt_eval_count, gen: stats.eval_count } : {}) });
         if (quietTok && content.trim() && !(calls.length && !denied)) emit('token', { text: reportLine(content, opts) });   // 学习：没有工具调用的这条才是汇报，补上屏
         if (content) lastText = content;
         if (denied || !calls.length) { if (!opts.sub) lastText = applyLinkFixes(lastText); emit('done', { stats: stats ? { n: stats.eval_count, tps: stats.eval_count / (stats.eval_duration / 1e9) } : null }); return lastText; }
