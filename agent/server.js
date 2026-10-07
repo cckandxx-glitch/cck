@@ -469,6 +469,13 @@ const server = http.createServer(async (req, res) => {
       if (q) for (const c of convs.values()) { try { const j = cur && c.id === cur.id ? { tr } : JSON.parse(fs.readFileSync(cfile(c.id), 'utf8')); if ((j.tr || []).some((x) => (x.role === 'user' || x.role === 'ai') && String(x.text || '').toLowerCase().includes(q))) ids.push(c.id); } catch (e) {} }
       return json(res, 200, { ids });
     }
+    // 10-07 只读查看：AI 忙的时候点历史对话，只把那个对话的记录读给界面看，不切换、不碰正在跑的任务
+    if (req.method === 'GET' && url.pathname === '/api/conv/view') {
+      const id = url.searchParams.get('id') || '';
+      if (!/^c\d+$/.test(id) || !fs.existsSync(cfile(id))) return json(res, 404, { error: '没有这个对话' });
+      try { const j = JSON.parse(fs.readFileSync(cfile(id), 'utf8')); return json(res, 200, { id: j.id, title: j.title, tr: (j.tr || []).slice(-400) }); }
+      catch (e) { return json(res, 500, { error: '读不了这个对话：' + e.message }); }
+    }
     if (req.method === 'GET' && url.pathname === '/api/events') {
       res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', Connection: 'keep-alive' });
       res.write(': ok\n\n'); clients.add(res); gpuStart(); req.on('close', () => { clients.delete(res); if (!clients.size) gpuStop(); }); return;
