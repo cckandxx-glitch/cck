@@ -82,7 +82,7 @@ function create({ cfg, pw, getBusy, setBusy, notify, onEvent, notGameUrl }) {
       const p = spawn('powershell.exe', args, { windowsHide: true, stdio: 'ignore' }); p.on('error', () => {});
     } catch (e) {}
   }
-  const say = (t, btnName) => { notify(t); toast(t, !!btnName, btnName); };
+  const say = (t, btnName) => { toast(t, !!btnName, btnName); };   // 只弹系统通知，不在聊天里留话（2026-10-07 用户：状态话越少越好）
 
   // ---------- 状态机 ----------
   async function doOff() {
@@ -90,7 +90,7 @@ function create({ cfg, pw, getBusy, setBusy, notify, onEvent, notGameUrl }) {
     try {
       const r = await pw.off();
       if (r.ok) { S.offByAuto = true; S.pendingOff = false; say(`检测到 ${label(S.game, S.title)} 在运行，AI 已自动下线。`, S.game); onEvent('autooff', { name: S.game, title: S.title }); }
-      else notify('自动下线没成功：' + r.text);
+      else notify('自动下线失败：' + r.text);
     } catch (e) { notify('自动下线出错：' + e.message); }
     finally { setBusy(null); transitioning = false; onEvent('state', {}); }
   }
@@ -99,14 +99,14 @@ function create({ cfg, pw, getBusy, setBusy, notify, onEvent, notGameUrl }) {
     try {
       const r = await pw.on();
       if (r.ok) { ok = true; S.pendingOn = false; say(text || '游戏已关闭，AI 已自动上线（约 7 秒）。'); onEvent('autoon', {}); }
-      else notify('自动上线没成功：' + r.text);
+      else notify('自动上线失败：' + r.text);
     } catch (e) { notify('自动上线出错：' + e.message); }
     finally { setBusy(null); transitioning = false; onEvent('state', {}); }
     return ok;
   }
   async function activate(det) {
     S.active = true; S.game = det.name; S.title = det.title; S.why = det.why; S.userForcedOn = false; S.offByAuto = false; S.resume = false; S.pendingOff = false; S.busyNoted = false;
-    notify(`检测到 ${label(det.name, det.title)} 在运行（${det.why}）。`); onEvent('state', {});
+    onEvent('state', {});
     if (S.forceNext) { S.userForcedOn = true; S.forceNext = false; return; }     // 用户在游戏刚被检测到时就点了强制上线
     const st = await pw.status();
     if (S.userForcedOn) return;
@@ -116,7 +116,7 @@ function create({ cfg, pw, getBusy, setBusy, notify, onEvent, notGameUrl }) {
   function deactivate() {
     const name = S.game, shown = label(S.game, S.title), need = (S.offByAuto || S.resume) && !S.userForcedOn;
     Object.assign(S, { active: false, game: '', title: '', why: '', missSince: 0, detSince: 0, offByAuto: false, resume: false, userForcedOn: false, pendingOff: false, busyNoted: false });
-    if (need) { S.pendingOn = true; S.pendingText = `${shown} 已关闭，AI 已自动上线（约 7 秒）。`; } else notify(`${shown} 已关闭。`);
+    if (need) { S.pendingOn = true; S.pendingText = `${shown} 已关闭，AI 已自动上线（约 7 秒）。`; }
     onEvent('state', {});
   }
 
@@ -131,7 +131,7 @@ function create({ cfg, pw, getBusy, setBusy, notify, onEvent, notGameUrl }) {
       if (S.active) { if (!S.missSince) S.missSince = now; if (now - S.missSince >= END_MS) deactivate(); }
     }
     if (S.active && S.pendingOff && !S.userForcedOn) {
-      if (getBusy()) { if (!S.busyNoted) { S.busyNoted = true; notify(`检测到 ${label(S.game, S.title)} 在运行，AI 正在${getBusy()}，做完后自动下线。`); } }
+      if (getBusy()) { S.busyNoted = true; }
       else await doOff();
     }
     if (!S.active && S.pendingOn && !getBusy()) { S.pendingOn = false; const st = await pw.status(); if (st.state === 'off') await doOn(S.pendingText); }

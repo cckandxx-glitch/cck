@@ -18,25 +18,24 @@ function make(cfg) {
   }
   async function off() {
     const before = await status();
-    if (before.state === 'down') return { ok: false, text: 'Ollama 服务没有运行，没有东西占着显存。' };
+    if (before.state === 'down') return { ok: false, text: 'Ollama 没在运行。' };
     await j('/api/generate', { model: cfg.model, keep_alive: 0 }).catch(() => {});
     for (let i = 0; i < 20; i++) {                        // 最多等 20 秒，反复核对
       const s = await status();
-      if (s.state === 'off' && s.others === 0) return { ok: true, text: `AI 已下线：显存已释放（核对 ollama ps 为空，原先占用 ${before.vramGB}GB）。需要时点「AI上线」，或直接发消息会自动上线，约需 7 秒。` };
+      if (s.state === 'off' && s.others === 0) return { ok: true, text: 'AI 已下线。' };
       await new Promise((r) => setTimeout(r, 1000));
     }
-    return { ok: false, text: '已发出下线指令，但 20 秒后核对 ollama ps 仍有模型占用，没有真正释放。' };
+    return { ok: false, text: '下线失败：显存没释放。' };
   }
   async function on() {
     const before = await status();
     if (before.state === 'on') return { ok: true, text: 'AI 已经在线。' };
-    if (before.state === 'down') return { ok: false, text: 'Ollama 服务没有运行，请先打开 Ollama。' };
-    const t0 = Date.now();
+    if (before.state === 'down') return { ok: false, text: 'Ollama 没在运行，请先打开。' };
     await j('/api/generate', { model: cfg.model, prompt: '', stream: false, keep_alive: -1 });   // 空请求只加载，keep_alive=-1：上线后一直在线，不因空闲而下线
     const s = await status();
     return s.state === 'on'
-      ? { ok: true, text: `AI 已上线（加载用了 ${((Date.now() - t0) / 1000).toFixed(1)} 秒，占显存 ${s.vramGB}GB）。` }
-      : { ok: false, text: '已发出上线指令，但核对 ollama ps 没有看到模型。' };
+      ? { ok: true, text: 'AI 已上线。' }
+      : { ok: false, text: '上线失败：没看到模型。' };
   }
   // 对话里的口语：只认比较短、明确提到 AI/模型 的句子，避免把正常内容当成命令
   function detect(text) {

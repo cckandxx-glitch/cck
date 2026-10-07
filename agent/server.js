@@ -35,7 +35,7 @@ const isRisky = (d) => !!d && (d.kind === 'delete' || (d.kind === 'command' && D
 const queue = { items: [], cancel: false };
 // ---------- 学习循环（2026-10-06 用户设定）：说"请学习/继续学"就一直跑，每轮学完自动开下一轮，只在聊天框汇报，不弹确认；说"停止学习"或点急停才停 ----------
 const learn = { on: false, round: 0, stopped: false };
-const LEARN_PROMPT = () => '（学习循环第 ' + (learn.round + 1) + ' 轮：本轮按自学计划深挖 1~2 个主题。本轮结束时，用简短的进度汇报收尾：学了哪些主题、结果存到哪个文件、下一轮准备学什么。不要问问题、不要等指示——下一轮会自动开始，直到用户说"停止学习"。）';
+const LEARN_PROMPT = () => '（学习循环第 ' + (learn.round + 1) + ' 轮：本轮按自学计划深挖 1~2 个主题。结束时只用一行汇报：学了什么 → 存在哪个文件。不要解释学习循环怎么运作，不要问问题、不要等指示，下一轮会自动开始。）';
 function stopLearn(reason) {
   if (!learn.on) return;
   learn.on = false; learn.stopped = true;
@@ -159,12 +159,12 @@ function onEvent(type, d) {
 
 function ask(q, detail) {
   if (learn.on) {            // 学习循环：不弹确认，直接自动同意（用户 2026-10-06：学习时不要让我点任何确认）
-    if (isRisky(detail)) { notice('学习循环中，跳过危险操作: ' + q.split('\n')[0]); return Promise.resolve(false); }   // 自动同意不打扰（2026-10-07 用户要求）
+    if (isRisky(detail)) { notice('已跳过：' + q.split('\n')[0]); return Promise.resolve(false); }   // 自动同意不打扰（2026-10-07 用户要求）
     return Promise.resolve(true);
   }
   if (unattended) {          // 无人值守：只允许往 任务结果/草稿/线索 写文件，其余一律拒绝
     const ok = detail.kind === 'write' && ['任务结果', '草稿', '线索'].some((d) => path.resolve(detail.path).startsWith(path.join(core.WS, d) + path.sep));
-    if (!ok) notice('无人值守，已拒绝: ' + q);
+    if (!ok) notice('已拒绝：' + q.split('\n')[0]);
     return Promise.resolve(ok);
   }
   if (allowAll && !isRisky(detail)) return Promise.resolve(true);   // 自动同意不打扰（2026-10-07 用户要求）
@@ -177,7 +177,7 @@ function ask(q, detail) {
 
 function choose(questions) {
   if (learn.on) return Promise.resolve(null);   // 学习中 AI 的提问直接跳过，不提示
-  if (unattended) { notice('无人值守，AI 的提问已跳过：' + questions.map((q) => q.question).join(' / ')); return Promise.resolve(null); }
+  if (unattended) return Promise.resolve(null);
   const id = ++cid;
   return new Promise((resolve) => {
     asks.set(id, { questions, resolve: (a) => { resolve(a); } });   // 2026-10-06 用户规则：提问不设超时，一直等
@@ -214,7 +214,7 @@ function offerForce(g, pendingText) {
   const text = `检测到 ${shown} 在运行，上线会占用约 19GB 显存，可能影响游戏。`;
   bar = { id: ++cid, kind: 'force', name: g.name, text, pendingText: pendingText || '' };
   auto.keepOffline();
-  notice(text + 'AI 暂时没有上线。请点页面上方的「强制上线」「这不是游戏」或「取消」；不点的话，游戏关闭后会自动上线。' + (pendingText ? '你刚才那句话会在强制上线后接着处理。' : ''));
+  notice('游戏运行中，AI 暂不上线，请在上方选择。');
   bc('bar', {}); bc('state', {});
 }
 // 助手关掉时让模型一起下线（模型是「一直在线」的，不然助手关了显存还被占着）
@@ -254,13 +254,13 @@ ${text}` : text;
   }
   if (cur.title === '新对话') { cur.title = text.replace(/\s+/g, ' ').slice(0, 30); bc('state', {}); }
   const am = auto.detect(text);
-  if (am) { auto.set(am === 'on'); notice(am === 'on' ? '自动模式已打开：检测到游戏时 AI 自动下线，游戏关闭后自动上线。' : '自动模式已关闭：AI 不会再自动上线/下线，需要时请自己点按钮。'); bc('state', {}); return; }
-  if (busy === '重启中') { notice('正在重启，稍后再发。'); return; }
+  if (am) { auto.set(am === 'on'); notice(am === 'on' ? '自动模式已开。' : '自动模式已关。'); bc('state', {}); return; }
+  if (busy === '重启中') { notice('重启中，稍后再发。'); return; }
   const act = pw.detect(text);
   busy = act ? 'AI 上线/下线' : '对话'; bc('state', {});
   try {
     if (act === 'on') { const g = auto.blocking(); if (g && (await pw.status()).state === 'off') { offerForce(g); return; } }
-    if (act) { const r = act === 'off' ? await pw.off() : await pw.on(); notice(r.text); if (r.ok) auto.manual(act); return; }
+    if (act) { const r = act === 'off' ? await pw.off() : await pw.on(); if (!r.ok) notice(r.text); if (r.ok) auto.manual(act); return; }
     unattended = false; allowAll = false; core.resetStop();
     // 学习循环口令：说"请学习/继续学"就一直学，直到说"停止学习"（2026-10-06 用户设定）
     if (isStopLearnCmd(text)) { if (learn.on) { stopLearn('你说"停止学习"'); } else notice('没在学习。'); return; }
@@ -320,7 +320,7 @@ async function runQueue(items) {
   queue.items = items.map((t, i) => ({ id: i + 1, text: t, status: '等待' })); bc('queue', queue);
   const dir = path.join(core.WS, '任务结果'); fs.mkdirSync(dir, { recursive: true });
   const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
-  notice('任务队列开始，共 ' + items.length + ' 项。无人值守：只允许写入「任务结果 / 草稿 / 线索」文件夹，不运行命令、不删除。');
+  notice('任务队列开始（' + items.length + ' 项）。');
   try {
     if ((await pw.status()).state === 'off') bootNotice();
     for (const it of queue.items) {
@@ -333,7 +333,7 @@ async function runQueue(items) {
       } catch (e) { it.status = '出错'; }
       bc('queue', queue);
     }
-  } finally { core.setMessages(keep); unattended = false; busy = null; notice('任务队列结束。结果在「文件」页的「任务结果」里。'); bc('state', {}); bc('queue', queue); }
+  } finally { core.setMessages(keep); unattended = false; busy = null; notice('任务队列完成，见「任务结果」。'); bc('state', {}); bc('queue', queue); }
 }
 
 async function runLeads(opt) {
@@ -398,7 +398,7 @@ const server = http.createServer(async (req, res) => {
     if (!/^(127\.0\.0\.1|localhost):\d+$/.test(host)) { res.writeHead(403); return res.end('forbidden'); }   // 防 DNS 重绑定
     const url = new URL(req.url, 'http://' + host);
     if (req.method === 'GET' && url.pathname === '/api/notgame' && url.searchParams.get('t') === TOKEN) {
-      const r = await auto.notGame(url.searchParams.get('name')); notice(r.text); if (bar && bar.name && bar.name.toLowerCase() === String(url.searchParams.get('name')).toLowerCase()) { bar = null; bc('bar', {}); }
+      const r = await auto.notGame(url.searchParams.get('name')); if (!r.ok) notice(r.text); if (bar && bar.name && bar.name.toLowerCase() === String(url.searchParams.get('name')).toLowerCase()) { bar = null; bc('bar', {}); }
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
       return res.end(`<!doctype html><meta charset="utf-8"><title>REIZE助手</title><body style="font:16px system-ui,'Microsoft YaHei UI';padding:40px;color:#18181b"><h2>${r.ok ? '已记住' : '没成功'}</h2><p>${String(r.text).replace(/[<>&]/g, '')}</p><p>可以关掉这个页面了。</p></body>`);
     }
@@ -478,7 +478,7 @@ const server = http.createServer(async (req, res) => {
       if (url.pathname === '/api/restart') {
         if (busy) return json(res, 409, { error: busyMsg('重启') });
         busy = '重启中'; bc('state', {});
-        notice('正在重启服务，马上回来。');
+        notice('重启中…');
         setTimeout(() => process.exit(0), 1500);
         return json(res, 200, { ok: true });
       }
@@ -493,7 +493,7 @@ const server = http.createServer(async (req, res) => {
       if (url.pathname === '/api/settings') {
         if (typeof b.online === 'boolean') cfg.online = b.online;
         if (typeof b.think === 'boolean') cfg.think = b.think;
-        if (typeof b.auto === 'boolean') { auto.set(b.auto); notice(b.auto ? '自动模式已打开：检测到游戏时 AI 自动下线，游戏关闭后自动上线。' : '自动模式已关闭：AI 不会再自动上线/下线，需要时请自己点按钮。'); }
+        if (typeof b.auto === 'boolean') { auto.set(b.auto); notice(b.auto ? '自动模式已开。' : '自动模式已关。'); }
         if (typeof b.desktop === 'boolean') desk.set(b.desktop);   // 开关本身在界面上看得到，不再往对话里插提示
         bc('state', {}); return json(res, 200, { ok: true });
       }
@@ -537,9 +537,9 @@ const server = http.createServer(async (req, res) => {
         const c = core.compacted(); if (!c || !c.archive.length) return json(res, 400, { error: '这个对话还没有压缩过。' });
         const src = cur.title; persist(); newConv(); cur.title = '压缩内容：' + src;
         const plain = (s) => String(s || '').replace(/\n\n（系统提示：[\s\S]*$/, '');
-        push({ role: 'notice', text: `【压缩内容】这是对话「${src}」被压缩掉的部分，不是新聊的。可以接着问 AI 这里面的事。` });
+        push({ role: 'notice', text: `【压缩内容 · ${src}】` });
         push({ role: 'ai', text: '**【压缩内容 · 摘要】**\n\n' + (c.summary || '（摘要没生成出来）'), done: true });
-        push({ role: 'notice', text: '【压缩内容 · 原话】下面是压缩前的原始对话' });
+        push({ role: 'notice', text: '【原话】' });
         let users = 0;
         for (const m of c.archive) {
           if (m.role === 'user' && !String(m.content).startsWith('（这是刚才操作后的屏幕截图')) { const t = plain(m.content); push({ role: 'user', text: t, raw: t }); users++; }
@@ -548,7 +548,7 @@ const server = http.createServer(async (req, res) => {
         }
         core.setMessages([{ role: 'system', summary: true, content: c.summary, archive: c.archive }]);
         droppedUsers = -users;   // 界面上的这些原话不在模型的对话里（在摘要的 archive 里），撤回编号要对齐
-        push({ role: 'notice', text: '【压缩内容】到此结束，下面是在这个对话里新聊的' });
+        push({ role: 'notice', text: '【以下为新对话】' });
         dirty = true; persist(); bc('conv', {}); bc('state', {}); return json(res, 200, { ok: true });
       }
       if (url.pathname === '/api/clear') { if (busy) return json(res, 409, { error: busyMsg('清空对话') }); core.clear(); tr.length = 0; bc('cleared', {}); return json(res, 200, { ok: true }); }
@@ -556,18 +556,18 @@ const server = http.createServer(async (req, res) => {
         if (busy) return json(res, 409, { error: busyMsg('切换上线/下线') });
         if (b.action !== 'off') { const g = auto.blocking(); if (g && (await pw.status()).state === 'off') { offerForce(g); return json(res, 200, { ok: false, blocked: true, text: `检测到 ${g.title || g.name} 在运行，AI 暂不上线（请选择强制上线、这不是游戏或取消）。` }); } }
         busy = 'AI 上线/下线'; bc('state', {});
-        try { const r = b.action === 'off' ? await pw.off() : await pw.on(); notice(r.text); if (r.ok) auto.manual(b.action === 'off' ? 'off' : 'on'); return json(res, 200, r); }
+        try { const r = b.action === 'off' ? await pw.off() : await pw.on(); if (!r.ok) notice(r.text); if (r.ok) auto.manual(b.action === 'off' ? 'off' : 'on'); return json(res, 200, r); }
         finally { busy = null; bc('state', {}); }
       }
       if (url.pathname === '/api/choice') {
         if (!bar || bar.id !== Number(b.id)) return json(res, 404, { error: '这个选择已过期' });
         const c = bar; bar = null; bc('bar', {}); bc('state', {});
-        if (b.key === 'notgame') { const r = await auto.notGame(c.name); notice(r.text); return json(res, 200, r); }
+        if (b.key === 'notgame') { const r = await auto.notGame(c.name); if (!r.ok) notice(r.text); return json(res, 200, r); }
         if (b.key === 'ack') return json(res, 200, { ok: true });
-        if (b.key !== 'force') { notice('已取消，AI 保持下线。游戏关闭后会自动上线。'); return json(res, 200, { ok: true }); }
-        if (busy) { notice(busyDoing() + '，请稍后再点强制上线。'); return json(res, 409, { error: busyMsg('强制上线') }); }
+        if (b.key !== 'force') { notice('已取消。'); return json(res, 200, { ok: true }); }
+        if (busy) { notice(busyDoing() + '，稍后再试。'); return json(res, 409, { error: busyMsg('强制上线') }); }
         busy = 'AI 上线/下线'; bc('state', {});
-        let r; try { r = await pw.on(); notice(r.ok ? '已强制上线（游戏期间不再自动下线，游戏关闭后恢复自动模式）。' + r.text : r.text); if (r.ok) auto.forceOn(); } finally { busy = null; bc('state', {}); }
+        let r; try { r = await pw.on(); if (!r.ok) notice(r.text); if (r.ok) auto.forceOn(); } finally { busy = null; bc('state', {}); }
         json(res, 200, { ok: !!(r && r.ok) });
         if (r && r.ok && c.pendingText) { busy = '对话'; bc('state', {}); try { unattended = false; core.resetStop(); await core.turn(c.pendingText); } catch (e) {} finally { busy = null; bc('state', {}); } }
         return;

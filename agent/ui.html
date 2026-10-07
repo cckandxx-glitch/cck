@@ -1406,7 +1406,7 @@ function connect() {
   es.addEventListener('noticeupd', (e) => { const d = JSON.parse(e.data); const el = chat.querySelector('[data-mid="' + d.mid + '"]'); if (el) el.textContent = d.text; wk.label = ''; });
   es.addEventListener('error', (e) => { if (e.data) add({ role: 'notice', text: '出错：' + JSON.parse(e.data).text }); });
   es.addEventListener('stopped', () => { closeLive(); add({ role: 'notice', text: '已急停。' }); refresh(); });
-  es.addEventListener('done', (e) => { closeLive(); const d = JSON.parse(e.data); if (d.stats) add({ role: 'notice', text: `（${d.stats.n} 字，${d.stats.tps.toFixed(0)} 字/秒）` }); refresh(); });
+  es.addEventListener('done', (e) => { closeLive(); refresh(); });   // 不再在每条回复后显示「N 字，X 字/秒」（2026-10-07 用户：状态话越少越好）
   es.addEventListener('confirm', (e) => { closeLive(); add(Object.assign({ role: 'confirm' }, JSON.parse(e.data))); });
   es.addEventListener('ask', (e) => { closeLive(); add(Object.assign({ role: 'ask', live: true }, JSON.parse(e.data))); });
   es.addEventListener('ask_done', (e) => { const d = JSON.parse(e.data); const el = chat.querySelector('.askq[data-aid="' + d.id + '"]'); if (el) { el.classList.remove('multi'); el.innerHTML = askDoneHtml({ questions: el._qs || [] }, d.answered); } refresh(); });
