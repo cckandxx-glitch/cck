@@ -1171,6 +1171,7 @@ setInterval(() => {
   let el = document.getElementById('wk');
   if (peek) { if (el) el.remove(); return; }   // 只读查看中不显示当前任务的进度动画
   if (!S.busy) { wk.t0 = 0; wk.kind = ''; if (el) el.remove(); return; }
+  if (S.busy === '学习循环' && wk.kind === S.busy && S.busySince > wk.t0) wk.t0 = S.busySince;   // 学习每开一轮，计时从 0 重新算
   if (!wk.t0 || wk.kind !== S.busy) { wk.t0 = wk.last = Date.now(); if (S.busySince && S.busySince <= wk.t0) wk.t0 = S.busySince; wk.label = ''; wk.kind = S.busy; if (S.busySince && Date.now() - S.busySince > 2000) wk.last = Date.now() - 2000; }   // 刷新页面时 AI 早就在忙：别再藏 1.5 秒   // 任何要长时间运算的活（对话、任务队列、线索挖掘、上线下线）都显示
   if (!el) el = h('div', '', '<i></i><span></span><b></b>'), el.id = 'wk', wkBalls(el.firstChild);
   const stick = atBottom();
@@ -1477,6 +1478,7 @@ function connect() {
   es.addEventListener('gpu',(e) => { gpuD = JSON.parse(e.data); gpuPaint(); });
   // 工作状态：AI 忙着但屏幕上 1.5 秒没新动静，就在对话底部显示它在干什么 + 已等多久
   es.addEventListener('token', () => { wk.last = Date.now(); wk.label = ''; });
+  es.addEventListener('wk', (e) => { wk.last = Date.now(); wk.label = JSON.parse(e.data).label || ''; });   // 学习时：第几轮第几步、模型写了多少字
   es.addEventListener('thinking', () => { wk.last = Date.now(); wk.label = '正在思考'; });
   es.addEventListener('tool', (e) => { wk.last = Date.now(); wk.label = '正在执行：' + (JSON.parse(e.data).name || ''); });
   es.addEventListener('toolresult', (e) => { wk.last = Date.now(); wk.label = JSON.parse(e.data).name === 'generate_image' ? '图已画好，AI 正在写回复' : '正在读取结果并继续想'; });

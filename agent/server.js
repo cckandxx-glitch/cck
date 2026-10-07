@@ -146,6 +146,12 @@ function onEvent(type, d) {
   else if (type === 'tool') wkLabel = '正在执行：' + (d.name || '');
   else if (type === 'toolresult') wkLabel = d.name === 'generate_image' ? '图已画好，AI 正在写回复' : '正在读取结果并继续想';
   else if (type === 'token' || type === 'done' || type === 'stopped' || type === 'error') wkLabel = '';
+  // 学习时中间步骤的字不上屏：用「第几轮 第几步 · 模型在写多少字」告诉界面它还在动，不是卡住（10-07 用户：学了 500 多秒看着卡在那）
+  if (type === 'step' || type === 'quiet') {
+    if (type === 'step') learn.step = d.step;
+    wkLabel = `学习第 ${learn.round} 轮 · 第 ${learn.step || 1} 步 · ` + (type === 'quiet' ? `模型在写（${d.n} 字）` : '等模型回答');
+    bc('wk', { label: wkLabel }); return;
+  }
   if (type === 'fixlinks') { const ai = [...tr].reverse().find((x) => x.role === 'ai'); if (ai) for (const [a, b] of d.pairs || []) ai.text = ai.text.split(a).join(b); return; }
   if (type === 'dropped') { droppedUsers -= d.users || 0; return; }   // 核心为腾上下文丢掉了模型记忆里最早的几轮：界面第 i 条用户消息对应模型里第 i-N 条，所以减
   if (type === 'token') {
@@ -334,7 +340,8 @@ async function runLearnLoop(firstText) {
         if (st.state === 'down') await ensureOllama();
         else if (st.state === 'off') bootNotice();
 
-        learn.round++; saveLearn(true);
+        learn.round++; learn.step = 0; saveLearn(true);
+        busySince = Date.now(); bc('state', {});   // 计时按每一轮算，不再从开始学习一直累加
         core.resetStop();
         const prompt = first ? firstText : LEARN_PROMPT();
         if (!first) {   // 每轮从干净的上下文开始：上一轮的过程全丢掉，只留它最后那段进度汇报（学了什么、存在哪、下一轮学什么）
@@ -345,7 +352,12 @@ async function runLearnLoop(firstText) {
         first = false;
         const before = core.getHistory();
         let failed = false;
-        try { const r = await core.turn(prompt, { loop: true }); if (r && r.trim()) report = r.trim(); fails = 0; } catch (e) { if (e.name !== 'StopError') { failed = true; fails++; learn.lastErr = e.message; } }
+        // 一轮最多 15 分钟（config 里 learnRoundMin 可改）：到点就收掉这一轮直接开下一轮，进度都在自学计划和知识库里，不会丢
+        let overtime = false;
+        const roundT = setTimeout(() => { if (learn.on && busy === '学习循环' && !learn.yielding) { overtime = true; learn.yielding = '本轮超时'; bbS('学习第', learn.round, '轮超过', cfg.learnRoundMin || 15, '分钟，收掉开下一轮'); core.stop(); } }, (cfg.learnRoundMin || 15) * 60000);
+        try { const r = await core.turn(prompt, { loop: true }); if (!overtime && r && r.trim()) report = r.trim(); fails = 0; } catch (e) { if (e.name !== 'StopError') { failed = true; fails++; learn.lastErr = e.message; } }
+        finally { clearTimeout(roundT); }
+        if (overtime) learn.yielding = false;
         if (!learn.on) break;
         if (learn.inbox.length || learn.yielding) { learn.yielding = false; continue; }   // 被用户插话 / 游戏打断的这一轮不算出错，先去处理
         let waitMs = 2000;   // 本轮结束，等 2 秒喘口气再开下一轮（期间说"停止学习"或急停都能打断）

@@ -117,6 +117,7 @@ function createCore(cfg, hooks = {}) {
 
   // ---------- 知识库（本地关键词检索 BM25，不用联网、不用另装模型） ----------
   let kb = { sig: '', docs: [], df: new Map(), avg: 1 };
+  const kbCache = new Map();   // 文件名 → { mtime, chunks }：没改过的文件不再重新抽字
   const tok = (s) => {
     s = s.toLowerCase(); const out = [];
     for (const m of s.matchAll(/[a-z0-9À-ɏЀ-ӿ]+|[一-鿿]+/g)) {
@@ -189,16 +190,25 @@ function createCore(cfg, hooks = {}) {
   function kbBuild() {
     const src = kbSources(); const sig = src.map((s) => s.name + s.mtime).join('|');
     if (sig === kb.sig) return kb;
-    const docs = [], df = new Map();
+    // 10-07：只重读改过的文件。以前学习每写一篇笔记，下次 kb_search 就把知识库里所有 PDF/Word 重新抽一遍字（同步调用，每个 PDF 最多 1 分钟），
+    // 整个后台跟着卡死几分钟，界面只剩计时在走、急停也点不动
+    const docs = [], df = new Map(), seen = new Set();
     for (const s of src) {
-      let text = ''; try { text = s.get(); } catch (e) { continue; }
-      for (let i = 0; i < text.length; i += 500) {
-        const chunk = text.slice(i, i + 700); const t = tok(chunk); if (!t.length) continue;
-        const tf = new Map(); for (const w of t) tf.set(w, (tf.get(w) || 0) + 1);
-        for (const w of tf.keys()) df.set(w, (df.get(w) || 0) + 1);
-        docs.push({ name: s.name, text: chunk, tf, len: t.length });
+      seen.add(s.name);
+      let c = kbCache.get(s.name);
+      if (!c || c.mtime !== s.mtime) {
+        let text = ''; try { text = s.get(); } catch (e) { continue; }
+        const chunks = [];
+        for (let i = 0; i < text.length; i += 500) {
+          const chunk = text.slice(i, i + 700); const t = tok(chunk); if (!t.length) continue;
+          const tf = new Map(); for (const w of t) tf.set(w, (tf.get(w) || 0) + 1);
+          chunks.push({ name: s.name, text: chunk, tf, len: t.length });
+        }
+        c = { mtime: s.mtime, chunks }; kbCache.set(s.name, c);
       }
+      for (const d of c.chunks) { for (const w of d.tf.keys()) df.set(w, (df.get(w) || 0) + 1); docs.push(d); }
     }
+    for (const k of kbCache.keys()) if (!seen.has(k)) kbCache.delete(k);
     kb = { sig, docs, df, avg: docs.reduce((a, d) => a + d.len, 0) / (docs.length || 1) };
     return kb;
   }
@@ -586,7 +596,7 @@ ${learnTodo()}
   const shotMsgs = new WeakSet();   // 屏幕截图消息：只保留最新一张，旧的把图片丢掉省上下文
   const dropOldShots = () => { for (const m of messages) if (shotMsgs.has(m) && m.images) { delete m.images; m.content = '（更早的屏幕截图已省略）'; } };
 
-  let quietTok = false;   // 学习时：中间步骤（带工具调用的）说的话不上屏，只显示最后那行汇报（10-07：模型老在调用工具前说 "Let me write…"）
+  let quietTok = false, quietAt = 0;   // 学习时：中间步骤（带工具调用的）说的话不上屏，只显示最后那行汇报（10-07：模型老在调用工具前说 "Let me write…"）
   async function chatOnce(extraOpts, noTools) {
     abortCtl = new AbortController();
     let stalled = '', stallT; const arm = (ms) => { clearTimeout(stallT); stallT = setTimeout(() => { stalled = ms >= 300000 ? 'start' : 'mid'; abortCtl.abort(); }, ms); };   // 等第一个字最多 5 分钟（冷启动加载大模型要久），出字以后 2 分钟没动静就当它挂了
@@ -619,7 +629,7 @@ ${learnTodo()}
         const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1); if (!line) continue;
         const j = JSON.parse(line), m = j.message || {};
         if (m.thinking && !thinking) { thinking = true; emit('thinking', {}); }
-        if (m.content) { thinking = false; if (!quietTok) emit('token', { text: m.content }); content += m.content; }
+        if (m.content) { thinking = false; if (!quietTok) emit('token', { text: m.content }); content += m.content; if (quietTok && Date.now() - quietAt > 1500) { quietAt = Date.now(); emit('quiet', { n: content.length }); } }   // 学习时字不上屏，但要让界面知道模型还在写、写了多少，不然看着像卡住
         if (m.tool_calls) calls.push(...m.tool_calls);
         if (j.done) stats = j;
       }
@@ -681,6 +691,7 @@ ${learnTodo()}
       const stepCap = opts.loop ? cfg.learnSteps || 40 : cfg.maxSteps;   // 学习一轮最多 40 步就收尾进下一轮，别一轮跑几百步、反复压缩（10-07）
       for (let step = 0; step < stepCap; step++) {
         checkStop(); trimHistory(); await compact(); checkStop();
+        if (opts.loop) emit('step', { step: step + 1 });
         const { content, calls, stats } = await chatOnce(undefined, denied);   // 用户拒绝过：这一轮不给工具，只许说话，不准换办法绕
         if (stats && stats.prompt_eval_count) lastUsed = stats.prompt_eval_count + (stats.eval_count || 0);
         messages.push({ role: 'assistant', content, ...(calls.length && !denied ? { tool_calls: calls } : {}) });
