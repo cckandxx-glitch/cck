@@ -200,11 +200,15 @@ textarea{width:100%;padding:10px 12px;border:1px solid var(--line2);border-radiu
 #wk b{font-weight:400;font-variant-numeric:tabular-nums}
 #wk>span::selection{-webkit-text-fill-color:var(--ink)}   /* 文字本身是透明渐变，选中时显示成正常字色 */
 #wk>span{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}   /* 顺序：已 xx 秒 · 硬件数据 · 正在干什么。长短会变的文字放最后，怎么变都推不动前面的东西 */
-#wk em .gauge{display:inline-flex;align-items:center;padding:4px 1px;margin:-4px 0}   /* 10-07 用户定：「显卡93% 内存45%」换成一个套环图标（外圈显卡、里圈内存），环走了多少就是占用多少，超 85% 那一圈变红；具体数字看鼠标提示 */
-#wk em .gauge svg{width:16px;height:16px;display:block;transform:rotate(-90deg)}   /* 从 12 点方向顺时针走 */
-#wk em .gauge circle{fill:none;stroke-width:2}
-#wk em .gauge .tr{stroke:var(--line2)}
-#wk em .gauge .v{stroke:currentColor;stroke-linecap:round;transition:stroke-dasharray .4s}
+#wk em .gauge{display:inline-flex;align-items:center;padding:4px 1px;margin:-4px 0}   /* 10-07 用户定：「显卡93% 内存45%」换成一个从中间劈开的圆环（左半显卡、右半内存），两半各自从底部往上走，走多少就是占用多少，超 85% 那半边变红；具体数字看鼠标提示 */
+#wk em .gauge svg{width:16px;height:16px;display:block;overflow:visible}
+/* 圆环尺寸：外径 14px（和这一行的字一样高），线宽 2px（中线半径 6），外沿正好落在第 1、15 像素上，100% 缩放下上下左右四个边是实的、不发虚 */
+#wk em .gauge circle,#wk em .gauge path{fill:none;stroke-width:2}
+#wk em .gauge .tr{stroke:rgba(255,255,255,.2)}   /* 底轨是一整个圆、一笔画完：两半的接缝处不会出现细线；哪一项没数据，那半边也只是空着，圆不会缺一块 */
+#wk em .gauge .v{stroke:currentColor;stroke-linecap:butt;stroke-dasharray:100 200;transition:stroke-dashoffset .9s cubic-bezier(.33,1,.68,1),color .6s ease}   /* 空隙留到 200（实测 100 101 在 0% 时顶上会漏一个亮点）。平头：两半都从正下方起笔、往上走，在底部和顶部正好碰头，不会互相盖住，也不鼓出小圆点 */
+/* 动画：数据每 2 秒来一次，弧线用 0.9 秒「先快后慢」滑到新位置——跟得上变化、又不会一顿一顿；变红/变灰 0.6 秒渐变 */
+#wk em .gauge.still .v{transition:none}   /* 刚建好、还原上次的位置时不播动画（切换对话不会每次从 0 重新长一遍） */
+@media (prefers-reduced-motion:reduce){#wk em .gauge .v{transition:none}}
 #wk>b{flex:none;text-align:right}   /* 宽度由脚本按「已 999 秒」定好；靠右对齐，后面的点紧挨着秒数 */
 #wk em{flex:none;display:inline-flex;align-items:center;font-style:normal;font-variant-numeric:tabular-nums;white-space:nowrap;opacity:.75}
 #wk em .hot{color:#e5484d}   /* 超过 85% 竖条变红 */
@@ -1118,18 +1122,32 @@ document.addEventListener('mouseup', () => { wkDown = false; }, true);
 function wkSel() { const w = document.getElementById('wk'), s = getSelection(); return !!w && (wkDown || (s.rangeCount > 0 && !s.isCollapsed && (w.contains(s.anchorNode) || w.contains(s.focusNode)))); }   // 正在选这一行的字：先别刷新
 // 量一段字在 el 里的宽度（px）：临时换上字、读 scrollWidth、再换回来
 function wkMeasure(el, t) { const o = el.textContent; el.textContent = t; const w = el.scrollWidth; el.textContent = o; return w; }
+const gaugeLast = {};   // 圆环两半上次画到哪、红没红：这一行被重建时接着画，不从 0 重来
 function gpuPaint() {
   const em = document.querySelector('#wk em'); if (!em || wkSel()) return;
-  if (!em.firstChild) em.innerHTML = '<span class="gauge"><svg viewBox="0 0 16 16">' + [['g', 7], ['m', 3.5]].map(([k, r]) => `<g data-k="${k}" data-r="${r}"><circle class="tr" cx="8" cy="8" r="${r}"/><circle class="v" cx="8" cy="8" r="${r}"/></g>`).join('') + '</svg></span>';   // 外圈显卡、里圈内存
+  if (!em.firstChild) em.innerHTML = '<span class="gauge"><svg viewBox="0 0 16 16" role="img"><circle class="tr" cx="8" cy="8" r="6"/>' + [['g', -1, 1], ['m', 1, 0]].map(([k, sx, sw]) => `<path data-k="${k}" class="v" d="M${8 - sx * .3} 13.99A6 6 0 1 ${sw} ${8 - sx * .3} 2.01" pathLength="100" style="stroke-dashoffset:100"/>`).join('') + '</svg></span>';   // 左半显卡（从正下方顺时针往上）、右半内存（从正下方逆时针往上）。两半在上下各多画 0.3px 越过中线：同色碰头时（比如都满了）中间不会透出一条暗缝
   const q = (k) => em.querySelector('[data-k="' + k + '"]'), d = gpuD || {}, f1 = (v) => Number(v).toFixed(1), tips = [];
-  const put = (k, pct) => { const e = q(k), C = 2 * Math.PI * e.dataset.r, a = (C * Math.max(0, Math.min(100, pct)) / 100).toFixed(2) + ' ' + C.toFixed(2), v = e.lastChild; if (v.getAttribute('stroke-dasharray') !== a) v.setAttribute('stroke-dasharray', a); e.classList.toggle('hot', pct > 85); };   // 圆环走过的长度 = 占用
+  const ga = em.querySelector('.gauge');
+  if (!ga._init) {   // 这一行刚建好：先不带动画摆回上次的样子；第一次打开界面则从 0 开始，下一帧再长到实际值
+    ga._init = true; ga.classList.add('still');
+    for (const k in gaugeLast) { q(k).style.strokeDashoffset = gaugeLast[k][0]; q(k).classList.toggle('hot', gaugeLast[k][1]); }
+    ga.getBoundingClientRect(); requestAnimationFrame(() => requestAnimationFrame(() => ga.classList.remove('still')));
+    if (!Object.keys(gaugeLast).length) { ga.classList.remove('still'); ga.getBoundingClientRect(); }
+  }
+  const put = (k, pct) => {   // 半边走过的长度 = 占用（pathLength=100，直接按百分比画）
+    const e = q(k), v = Math.round(Math.max(0, Math.min(100, Number(pct) || 0))), o = String(100 - v);
+    if (e.style.strokeDashoffset !== o) e.style.strokeDashoffset = o;
+    const hot = e.classList.contains('hot') ? v >= 80 : v > 85; e.classList.toggle('hot', hot);   // 超过 85 变红、降到 80 以下才变回灰：在 85 上下抖时颜色不会来回闪
+    gaugeLast[k] = [o, hot];
+  };
+  ga.style.display = d.total || d.memTotal ? '' : 'none';   // 一项数据都没有时整个圆环不出现，不留一个空圈
   q('g').style.display = d.total ? '' : 'none'; q('m').style.display = d.memTotal ? '' : 'none';
-  if (d.total) { put('g', d.util); tips.push(`显卡 ${d.util}%（${d.util >= 20 ? '运算中' : '空闲中'}，显存 ${f1(d.used)} / ${d.total} GB）`); }
+  if (d.total) { put('g', d.util); tips.push(`左半 显卡 ${d.util}%（${d.util >= 20 ? '运算中' : '空闲中'}，显存 ${f1(d.used)} / ${d.total} GB）`); }
   if (d.memTotal) {
     const mp = Math.round(d.memUsed / d.memTotal * 100);
-    put('m', mp); tips.push(`内存 ${mp}%（${f1(d.memUsed)} / ${f1(d.memTotal)} GB` + (d.virtTotal ? `，虚拟内存 ${f1(d.virtUsed)} / ${f1(d.virtTotal)} GB` : '') + '）');
+    put('m', mp); tips.push(`右半 内存 ${mp}%（${f1(d.memUsed)} / ${f1(d.memTotal)} GB` + (d.virtTotal ? `，虚拟内存 ${f1(d.virtUsed)} / ${f1(d.virtTotal)} GB` : '') + '）');
   }
-  if (tips.length) wkTip(em, tips.join(' · '));   // 鼠标放在圆环上：外圈显卡、里圈内存的具体数字
+  if (tips.length) { const t = tips.join(' · '); wkTip(em, t); const sv = em.querySelector('svg'); if (sv.getAttribute('aria-label') !== t) sv.setAttribute('aria-label', t); }   // 鼠标放在圆环上：左半显卡、右半内存的具体数字
 }
 // 复制这一行：连成一行，各段之间补上「 · 」（不然会被拆成好几行）
 document.addEventListener('copy', (e) => { const w = document.getElementById('wk'), s = getSelection(); if (!w || !s.rangeCount || !w.contains(s.anchorNode) || !w.contains(s.focusNode)) return; e.preventDefault(); e.clipboardData.setData('text/plain', s.toString().trim().replace(/\s*\n\s*/g, ' · ')); });
