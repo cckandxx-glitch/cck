@@ -181,7 +181,7 @@ function ask(q, detail) {
     if (!ok) notice('已拒绝：' + q.split('\n')[0]);
     return Promise.resolve(ok);
   }
-  if (allowAll && !isRisky(detail)) return Promise.resolve(true);   // 自动同意不打扰（2026-10-07 用户要求）
+  if (!isRisky(detail)) return Promise.resolve(true);   // 10-07 用户定：只有删除和危险命令才弹确认，其余读写、改文件、普通命令、打开程序一律直接执行
   const id = ++cid;
   return new Promise((resolve) => {
     pending.set(id, { q, detail, resolve: (ok) => { resolve(ok); } });   // 2026-10-06 用户规则：确认不设超时，一直等
