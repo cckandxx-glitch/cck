@@ -9,7 +9,7 @@ const cfg = (() => { try { return JSON.parse(fs.readFileSync(path.join(AGENT, 'c
 const PORT = cfg.port || 5200, BASE = `http://127.0.0.1:${PORT}`;
 const STATE = path.join(__dirname, 'state.json');
 let server = null, win = null;
-// 10-07 学习循环 24 小时不停：后台学习时会写 agent/learn.json。学习中不让电脑睡眠；关窗口前先问一句（关了学习会停，下次打开自动接着学）
+// 10-07 学习循环 24 小时不停：后台学习时会写 agent/learn.json。学习中不让电脑睡眠；关窗口前先问一句（关了学习会停，下次要再说「继续学习」）
 const LEARNF = path.join(AGENT, 'learn.json');
 const learning = () => fs.existsSync(LEARNF);
 let psb = -1, sessionEnding = false, closeOk = false;
@@ -79,7 +79,7 @@ async function createWindow() {
   win.on('maximize', sendMax); win.on('unmaximize', sendMax); win.webContents.on('did-finish-load', sendMax);
   win.on('close', (e) => {
     if (closeOk || sessionEnding || !learning()) return;
-    const r = dialog.showMessageBoxSync(win, { type: 'question', title: 'REIZE助手', message: 'AI 正在学习循环。', detail: '关掉窗口学习会停下（下次打开助手会自动接着学）。\n想让它一直学，请选「最小化，接着学」。', buttons: ['最小化，接着学', '仍然关闭'], defaultId: 0, cancelId: 0, noLink: true });
+    const r = dialog.showMessageBoxSync(win, { type: 'question', title: 'REIZE助手', message: 'AI 正在学习循环。', detail: '关掉窗口学习就停了，下次打开助手要再说一次「继续学习」才会接着学。\n想让它一直学，请选「最小化，接着学」。', buttons: ['最小化，接着学', '仍然关闭'], defaultId: 0, cancelId: 0, noLink: true });
     if (r === 0) { e.preventDefault(); win.minimize(); bb('学习中点了关闭，改为最小化'); }
     else closeOk = true;
   });

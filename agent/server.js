@@ -35,9 +35,11 @@ const isRisky = (d) => !!d && (d.kind === 'delete' || (d.kind === 'command' && D
 const queue = { items: [], cancel: false };
 // ---------- 学习循环（2026-10-06 用户设定）：说"请学习/继续学"就一直跑，每轮学完自动开下一轮，只在聊天框汇报，不弹确认；说"停止学习"或点急停才停 ----------
 const learn = { on: false, round: 0, stopped: false, inbox: [], yielding: false, since: 0 };
-// 10-07 用户：除非我说"停止学习"，否则 24 小时不停。学习开着就记到 learn.json：窗口被关、后台崩、电脑重启后再打开助手，自动接着学；只有用户叫停才删
+// 10-07 用户：开着助手时 24 小时不停学，直到说"停止学习"；但关掉助手后不自动接着学，要用户再说一次"继续学习"。
+// learn.json 只是「正在学」的标记，给外壳用（学习中不让电脑睡眠、关窗先问一句）；后台一启动、一退出都删掉
 const LEARNF = path.join(__dirname, 'learn.json');
 const saveLearn = (on) => { try { if (on) fs.writeFileSync(LEARNF, JSON.stringify({ on: true, round: learn.round, since: learn.since || Date.now() })); else if (fs.existsSync(LEARNF)) fs.unlinkSync(LEARNF); } catch (e) {} };
+saveLearn(false); process.on('exit', () => saveLearn(false));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const LEARN_PROMPT = () => '（学习循环第 ' + learn.round + ' 轮：本轮按自学计划深挖 1~2 个主题。本轮结束时，用简短的进度汇报收尾：学了哪些主题、结果存到哪个文件、下一轮准备学什么。不要问问题、不要等指示——下一轮会自动开始，直到用户说"停止学习"。）';
 function stopLearn(reason) {
@@ -284,20 +286,18 @@ ${text}` : text;
 }
 
 async function runLearnLoop(firstText) {
-  // firstText 为空 = 助手重新打开后自动接上次没叫停的学习（轮数接着数）
   learn.on = true; learn.stopped = false; learn.inbox = []; learn.yielding = false;
-  if (firstText) { learn.round = 0; learn.since = Date.now(); }
+  learn.round = 0; learn.since = Date.now();
   saveLearn(true);
   busy = '学习循环'; bc('state', {});
-  notice(firstText ? '学习循环开始：每轮学完自动开下一轮，只在聊天框汇报进度。中途发消息我会先回答、答完接着学；说"停止学习"或点急停才停。'
-    : '上次的学习循环没有被叫停（窗口关了或助手重启了），现在从第 ' + (learn.round + 1) + ' 轮接着学。说"停止学习"或点急停才停。');
+  notice('学习循环开始：每轮学完自动开下一轮，只在聊天框汇报进度。中途发消息我会先回答、答完接着学；说"停止学习"或点急停才停。关掉助手学习也会停，下次要再说"继续学习"。');
   // 学习要占用 busy；用户插话、游戏让路时会临时让出，拿回来前等别的事做完
   const claim = async () => { while (learn.on && busy && busy !== '学习循环') await sleep(500); if (learn.on) { busy = '学习循环'; bc('state', {}); } };
   // 学到一半检测到游戏：不等这一轮学完，马上打断让出显存
   const gameWatch = setInterval(() => { if (learn.on && busy === '学习循环' && !learn.yielding && auto.blocking() && !auto.get().forced) { learn.yielding = '检测到游戏在运行，学习这一轮先停下，让出显存。'; core.stop(); } }, 3000);
   const pause = async (ms) => { for (let i = 0; i < ms / 100 && learn.on && !learn.inbox.length && !learn.yielding; i++) await sleep(100); };
   try {
-    let first = !!firstText, fails = 0;
+    let first = true, fails = 0;
     while (learn.on) {
       try {
         // 1. 用户在学习中发了消息：先回答，答完接着学（10-07 用户：不要有任何会打断学习的机制）
@@ -361,7 +361,7 @@ async function runLearnLoop(firstText) {
     }
   } finally {
     clearInterval(gameWatch);
-    learn.on = false; learn.yielding = false;
+    learn.on = false; learn.yielding = false; saveLearn(false);
     if (busy === '学习循环') busy = null;
     persist(); bc('state', {});
     if (!learn.stopped) notice('学习循环结束，共 ' + learn.round + ' 轮。');
@@ -677,17 +677,6 @@ server.listen(PORT, '127.0.0.1', async () => {
   if (st.state === 'off') userOffline = true;   // 刚启动时模型不在显存里 = 下线；不记这个，界面会把「没人下线过」当成在线显示 ON
   console.log(`REIZE助手 网页界面已启动\n地址: ${url}\nAI: ${st.state === 'on' ? '在线' : st.state === 'off' ? '下线' : 'Ollama 服务没有运行'}   联网: ${cfg.online ? '开' : '关'}   自动模式: ${auto.get().on ? '开' : '关'}\n关闭这个窗口(模型会一起下线) = 停止助手。`);
   if (!process.argv.includes('--no-open')) openUi(url);
-  // 上次的学习循环没被叫停（窗口关了、后台崩了、电脑重启了）：起来后自动接着学
-  let lj = null; try { lj = JSON.parse(fs.readFileSync(LEARNF, 'utf8')); } catch (e) {}
-  if (lj && lj.on) setTimeout(function resume() {
-    if (learn.on) return;
-    if (busy) return setTimeout(resume, 3000);   // 正在上线等别的事：等它做完再接
-    learn.round = +lj.round || 0; learn.since = +lj.since || Date.now();
-    if (cur.title === '新对话') cur.title = '学习循环（自动接续）';
-    const um = push({ role: 'user', text: '继续学习（助手重新打开，自动接上次的学习）', raw: '继续学习' }); bc('user', { text: um.text, mid: um.mid });
-    bbS('自动接续学习循环，上次到第', learn.round, '轮');
-    runLearnLoop(null);
-  }, 5000);
 });
 server.on('error', (e) => {
   if (e.code === 'EADDRINUSE') {
