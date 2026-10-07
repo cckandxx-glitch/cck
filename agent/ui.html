@@ -208,7 +208,7 @@ textarea{width:100%;padding:10px 12px;border:1px solid var(--line2);border-radiu
 #wk em .gauge path,#wk em .gauge circle{fill:none;stroke-linecap:butt}   /* 线宽由脚本按真实像素算（见 gaugeSvg） */
 #wk em .gauge .gt{stroke:rgba(255,255,255,.2)}   /* 底：一整圈一笔画完（显卡空闲时的灰），内存段和红段都叠在它上面，段与段交界处不会透出暗缝 */
 #wk em .gauge .gv{stroke:#e5484d;stroke-dasharray:100 200;transition:stroke-dashoffset .9s cubic-bezier(.33,1,.68,1)}   /* 显卡在工作的那段红：0.9 秒先快后慢滑到新位置（数据每 2 秒来一次，跟得上又不一顿一顿）；空隙留到 200，0% 时末端不漏亮点 */
-#wk em .gauge .mm{stroke:#c4c4c9;transition:stroke .6s ease}   /* 内存段：灰白 */
+#wk em .gauge .mm{stroke:#929296;transition:stroke .6s ease}   /* 内存段：浅灰。10-07 用户：原来的灰白 #c4c4c9 看着比显卡段粗（几何线宽实测一样，是太亮显粗）；压到 #626266 又和显卡空闲的灰分不太清。用户定取中间值：屏幕上明度差 ΔL* 约 37（原来 51、压暗版 22） */
 #wk em .gauge .mm.warn{stroke:#f5a524}   /* 内存快满：整段变琥珀黄，0.6 秒渐变 */
 #wk em .gauge.still .gv,#wk em .gauge.still .mm{transition:none}   /* 刚建好、还原上次的样子时不播动画（切换对话不会每次从 0 重新长一遍） */
 @media (prefers-reduced-motion:reduce){#wk em .gauge .gv,#wk em .gauge .mm{transition:none}}
