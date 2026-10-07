@@ -200,9 +200,9 @@ textarea{width:100%;padding:10px 12px;border:1px solid var(--line2);border-radiu
 #wk b{font-weight:400;font-variant-numeric:tabular-nums}
 #wk>span::selection{-webkit-text-fill-color:var(--ink)}   /* 文字本身是透明渐变，选中时显示成正常字色 */
 #wk>span{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}   /* 顺序：已 xx 秒 · 硬件数据 · 正在干什么。长短会变的文字放最后，怎么变都推不动前面的东西 */
-#wk em .gauge{display:inline-flex;align-items:center;gap:6px;padding:4px 1px;margin:-4px 0}   /* 10-07 用户要更简：「显卡93% 内存45%」换成两个小圆环（左显卡、右内存），环走了多少圈就是占用多少，超 85% 变红；具体数字看鼠标提示 */
-#wk em .gauge svg{width:14px;height:14px;display:block;transform:rotate(-90deg)}   /* 从 12 点方向顺时针走 */
-#wk em .gauge circle{fill:none;stroke-width:2.4}
+#wk em .gauge{display:inline-flex;align-items:center;padding:4px 1px;margin:-4px 0}   /* 10-07 用户定：「显卡93% 内存45%」换成一个套环图标（外圈显卡、里圈内存），环走了多少就是占用多少，超 85% 那一圈变红；具体数字看鼠标提示 */
+#wk em .gauge svg{width:16px;height:16px;display:block;transform:rotate(-90deg)}   /* 从 12 点方向顺时针走 */
+#wk em .gauge circle{fill:none;stroke-width:2}
 #wk em .gauge .tr{stroke:var(--line2)}
 #wk em .gauge .v{stroke:currentColor;stroke-linecap:round;transition:stroke-dasharray .4s}
 #wk>b{flex:none;text-align:right}   /* 宽度由脚本按「已 999 秒」定好；靠右对齐，后面的点紧挨着秒数 */
@@ -1120,16 +1120,16 @@ function wkSel() { const w = document.getElementById('wk'), s = getSelection(); 
 function wkMeasure(el, t) { const o = el.textContent; el.textContent = t; const w = el.scrollWidth; el.textContent = o; return w; }
 function gpuPaint() {
   const em = document.querySelector('#wk em'); if (!em || wkSel()) return;
-  if (!em.firstChild) em.innerHTML = '<span class="gauge">' + ['g', 'm'].map((k) => `<svg data-k="${k}" viewBox="0 0 14 14"><circle class="tr" cx="7" cy="7" r="5.6"/><circle class="v" cx="7" cy="7" r="5.6"/></svg>`).join('') + '</span>';
+  if (!em.firstChild) em.innerHTML = '<span class="gauge"><svg viewBox="0 0 16 16">' + [['g', 7], ['m', 3.5]].map(([k, r]) => `<g data-k="${k}" data-r="${r}"><circle class="tr" cx="8" cy="8" r="${r}"/><circle class="v" cx="8" cy="8" r="${r}"/></g>`).join('') + '</svg></span>';   // 外圈显卡、里圈内存
   const q = (k) => em.querySelector('[data-k="' + k + '"]'), d = gpuD || {}, f1 = (v) => Number(v).toFixed(1), tips = [];
-  const put = (k, pct) => { const e = q(k), C = 2 * Math.PI * 5.6, a = (C * Math.max(0, Math.min(100, pct)) / 100).toFixed(2) + ' ' + C.toFixed(2), v = e.lastChild; if (v.getAttribute('stroke-dasharray') !== a) v.setAttribute('stroke-dasharray', a); e.classList.toggle('hot', pct > 85); };   // 圆环走过的长度 = 占用
+  const put = (k, pct) => { const e = q(k), C = 2 * Math.PI * e.dataset.r, a = (C * Math.max(0, Math.min(100, pct)) / 100).toFixed(2) + ' ' + C.toFixed(2), v = e.lastChild; if (v.getAttribute('stroke-dasharray') !== a) v.setAttribute('stroke-dasharray', a); e.classList.toggle('hot', pct > 85); };   // 圆环走过的长度 = 占用
   q('g').style.display = d.total ? '' : 'none'; q('m').style.display = d.memTotal ? '' : 'none';
   if (d.total) { put('g', d.util); tips.push(`显卡 ${d.util}%（${d.util >= 20 ? '运算中' : '空闲中'}，显存 ${f1(d.used)} / ${d.total} GB）`); }
   if (d.memTotal) {
     const mp = Math.round(d.memUsed / d.memTotal * 100);
     put('m', mp); tips.push(`内存 ${mp}%（${f1(d.memUsed)} / ${f1(d.memTotal)} GB` + (d.virtTotal ? `，虚拟内存 ${f1(d.virtUsed)} / ${f1(d.virtTotal)} GB` : '') + '）');
   }
-  if (tips.length) wkTip(em, tips.join(' · '));   // 鼠标放在圆环上：左显卡、右内存的具体数字
+  if (tips.length) wkTip(em, tips.join(' · '));   // 鼠标放在圆环上：外圈显卡、里圈内存的具体数字
 }
 // 复制这一行：连成一行，各段之间补上「 · 」（不然会被拆成好几行）
 document.addEventListener('copy', (e) => { const w = document.getElementById('wk'), s = getSelection(); if (!w || !s.rangeCount || !w.contains(s.anchorNode) || !w.contains(s.focusNode)) return; e.preventDefault(); e.clipboardData.setData('text/plain', s.toString().trim().replace(/\s*\n\s*/g, ' · ')); });
