@@ -10,7 +10,8 @@ const BASE = path.join(__dirname, '..');
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36';
 const cut = (s, n) => (String(s).length > n ? String(s).slice(0, n) + `\n…（已截断，共 ${String(s).length} 字）` : String(s));
 const unent = (s) => s.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;|&#x27;/g, "'").replace(/&#183;/g, '·').replace(/&nbsp;|&ensp;|&emsp;/g, ' ').replace(/&#x([0-9a-f]+);/gi, (m, h) => String.fromCodePoint(parseInt(h, 16))).replace(/&#(\d+);/g, (m, n) => String.fromCodePoint(+n));
-const html2text = (h) => unent(h.replace(/<(script|style|noscript)[\s\S]*?<\/\1>/gi, ' ').replace(/<[^>]+>/g, ' ')).replace(/[ \t\r\f]+/g, ' ').replace(/\n\s*\n+/g, '\n').trim();
+// 只处理前 2MB：超大网页（或 <script> 没闭合）时下面的正则会卡住整个后台好几分钟（10-07 fetch_url 卡 620 秒）
+const html2text = (h) => unent(String(h).slice(0, 2e6).replace(/<(script|style|noscript)[\s\S]*?<\/\1>/gi, ' ').replace(/<[^>]+>/g, ' ')).replace(/[ \t\r\f]+/g, ' ').replace(/\n\s*\n+/g, '\n').trim();
 
 function createCore(cfg, hooks = {}) {
   const emitRaw = hooks.emit || (() => {});
@@ -99,7 +100,7 @@ function createCore(cfg, hooks = {}) {
   }
   const fetchText = async (url) => {
     if (!/^https?:\/\//i.test(url)) throw new Error('只支持 http/https 网址');
-    const buf = await curl(url, [], { raw: true });
+    const buf = await curl(url, ['--max-filesize', '20000000'], { raw: true });   // 超过 20MB 的文件不下载
     if (buf.slice(0, 4).toString() === '%PDF') {   // 网上的 PDF：落到临时文件再抽文字
       const tmp = path.join(os.tmpdir(), `ai-dl-${process.pid}-${Date.now()}.pdf`);
       fs.writeFileSync(tmp, buf);
@@ -122,7 +123,7 @@ function createCore(cfg, hooks = {}) {
   // PDF 抽文字：用 Git 自带的 pdftotext（也认 config 里的 pdftotext 路径）
   const pdfBin = () => [cfg.pdftotext, 'C:/Program Files/Git/mingw64/bin/pdftotext.exe', 'C:/Program Files/Git/mingw64/bin/pdftotext', 'pdftotext'].filter(Boolean).find((p) => p === 'pdftotext' || fs.existsSync(p));
   function pdfText(f) {
-    const r = require('child_process').spawnSync(pdfBin(), ['-enc', 'UTF-8', f, '-'], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, windowsHide: true });
+    const r = require('child_process').spawnSync(pdfBin(), ['-enc', 'UTF-8', f, '-'], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, windowsHide: true, timeout: 60000 });   // 同步调用会卡住整个后台：坏掉的 / 超大的 PDF 最多等 1 分钟
     return r.stdout || '';
   }
   // Office 文件（docx/xlsx/pptx 本质是 zip）：用 Windows 自带的 tar 解包，抽出文字
