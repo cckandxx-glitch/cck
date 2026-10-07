@@ -200,7 +200,8 @@ textarea{width:100%;padding:10px 12px;border:1px solid var(--line2);border-radiu
 #wk b{font-weight:400;font-variant-numeric:tabular-nums}
 #wk>span::selection{-webkit-text-fill-color:var(--ink)}   /* 文字本身是透明渐变，选中时显示成正常字色 */
 #wk>span{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}   /* 顺序：已 xx 秒 · 硬件数据 · 正在干什么。长短会变的文字放最后，怎么变都推不动前面的东西 */
-#wk em .c{display:inline-block;text-align:right}   /* 数字靠右放进按最宽情况定好的格子里：93% 前面那点空就是「显卡 93%」的空格，100% 正好填满 */
+#wk em .c{display:inline-block;text-align:right}
+#wk em [data-k=m]{margin-left:.6em}   /* 「显卡 93%」和「内存 45%」两组之间拉开，比组内的空大，一眼看出谁跟谁 */   /* 数字靠右放进按最宽情况定好的格子里：93% 前面那点空就是「显卡 93%」的空格，100% 正好填满 */
 #wk>b{flex:none;text-align:right}   /* 宽度由脚本按「已 999 秒」定好；靠右对齐，后面的点紧挨着秒数 */
 #wk em{flex:none;font-style:normal;font-variant-numeric:tabular-nums;white-space:nowrap;opacity:.75}
 #wk:not(.idle) em:not(:empty){margin:0 -4px}
@@ -1118,28 +1119,27 @@ function wkSel() { const w = document.getElementById('wk'), s = getSelection(); 
 function wkMeasure(el, t) { const o = el.textContent; el.textContent = t; const w = el.scrollWidth; el.textContent = o; return w; }
 function gpuPaint() {
   const em = document.querySelector('#wk em'); if (!em || wkSel()) return;
-  if (!em.firstChild) em.innerHTML = '<span data-k="g">显卡<span class="c" data-k="gu"></span> <span class="c" data-k="gm"></span></span> <span data-k="m">内存<span class="c" data-k="mp"></span></span>';
+  if (!em.firstChild) em.innerHTML = '<span data-k="g">显卡<span class="c" data-k="gu"></span></span> <span data-k="m">内存<span class="c" data-k="mp"></span></span>';
   const q = (k) => em.querySelector('[data-k="' + k + '"]'), d = gpuD || {}, f1 = (v) => Number(v).toFixed(1), f0 = (v) => Math.round(Number(v));
   const put = (k, t, pct) => { const e = q(k); wkTxt(e, t); e.classList.toggle('hot', pct > 85); };   // 任何一项超过 85% 就变红，平时整行都是灰的
   q('g').style.display = d.total ? '' : 'none'; q('m').style.display = d.memTotal ? '' : 'none';
   if (d.total) {
-    const key = f0(d.total) + '|' + getComputedStyle(em).fontSize;
-    if (em._mw !== key) {   // 格子宽度按最宽的情况量一次：显卡「 100%」（前面带一点空）、显存「24/24G」、内存「99%」
-      const ws = [[q('gu'), '\u2009100%'], [q('gm'), f0(d.total) + '/' + f0(d.total) + 'G'], [q('mp'), '99%']].map(([e, t]) => { e.style.minWidth = ''; return [e, wkMeasure(e, t)]; });
+    const key = getComputedStyle(em).fontWeight + '|' + getComputedStyle(em).fontSize;
+    if (em._mw !== key) {   // 格子宽度按两位数「99%」量一次：两位数正好填满（显卡93%），一位数前面空一位（显卡 5%）
+      const ws = [[q('gu'), '99%'], [q('mp'), '99%']].map(([e, t]) => { e.style.minWidth = ''; return [e, wkMeasure(e, t)]; });
       if (ws.every(([, w]) => w > 0)) { ws.forEach(([e, w]) => { e.style.minWidth = w + 'px'; }); em._mw = key; }
     }
-    put('gu', d.util + '%', d.util);
-    put('gm', f0(d.used) + '/' + f0(d.total) + 'G', d.used / d.total * 100);
-    wkTip(q('g'), `${d.name || '显卡'}：${d.util >= 20 ? '运算中' : '空闲中'}，显存 ${f1(d.used)} / ${d.total} GB`);
+    put('gu', Math.min(99, d.util) + '%', d.util);   // 100% 显示成 99%：格子只留两位，满载时后面就不会被挤得来回跳；精确值看鼠标提示
+    wkTip(q('g'), `${d.name || '显卡'}：${d.util >= 20 ? '运算中' : '空闲中'} ${d.util}%，显存 ${f1(d.used)} / ${d.total} GB`);
   }
   if (d.memTotal) {
     const mp = Math.round(d.memUsed / d.memTotal * 100);
-    put('mp', mp + '%', mp);
-    wkTip(q('m'), `内存 ${f1(d.memUsed)} / ${f1(d.memTotal)} GB` + (d.virtTotal ? `，虚拟内存 ${f1(d.virtUsed)} / ${f1(d.virtTotal)} GB` : ''));   // 虚拟内存只放在鼠标提示里
+    put('mp', Math.min(99, mp) + '%', mp);
+    wkTip(q('m'), `内存 ${mp}%，${f1(d.memUsed)} / ${f1(d.memTotal)} GB` + (d.virtTotal ? `，虚拟内存 ${f1(d.virtUsed)} / ${f1(d.virtTotal)} GB` : ''));   // 虚拟内存只放在鼠标提示里
   }
 }
 // 复制这一行：连成一行，各段之间补上「 · 」（不然会被拆成好几行）
-document.addEventListener('copy', (e) => { const w = document.getElementById('wk'), s = getSelection(); if (!w || !s.rangeCount || !w.contains(s.anchorNode) || !w.contains(s.focusNode)) return; e.preventDefault(); e.clipboardData.setData('text/plain', s.toString().replace(/\u2009/g, '').trim().replace(/\s*\n\s*/g, ' · ')); });
+document.addEventListener('copy', (e) => { const w = document.getElementById('wk'), s = getSelection(); if (!w || !s.rangeCount || !w.contains(s.anchorNode) || !w.contains(s.focusNode)) return; e.preventDefault(); e.clipboardData.setData('text/plain', s.toString().trim().replace(/\s*\n\s*/g, ' · ')); });
 // 思考动画：8 个红色小球，像毒液的共生体那样彼此融合。
 // 每一轮：摆成一个形状 → 8 颗两两粘成 4 团 → 再粘成 2 团 → 粘成 1 团（在团里蠕动）→ 倒着一层层分裂 → 长成另一个形状（每次随机换，不和上一个重复）
 // 形状有三个：立方体、晶格（立方晶体，原子在原位热振动）、三叶结（数学里最简单的纽结，球沿着它追）。整体绕竖轴转、固定斜着看
