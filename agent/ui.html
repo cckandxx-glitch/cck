@@ -599,7 +599,7 @@ html.loading body{visibility:hidden}
     <h2>AI文件夹</h2>
     <p class="sub" id="fSub"></p>
     <div class="panel"><div id="fLists"></div></div>
-    <div class="panel" id="vBox" style="display:none"><div style="display:flex;justify-content:space-between;margin-bottom:8px"><b id="vName"></b><a class="hint" style="cursor:pointer" onclick="document.getElementById('vBox').style.display='none'">关闭</a></div><div id="viewer"></div></div>
+    <div class="panel" id="vBox" style="display:none"><div style="display:flex;justify-content:space-between;margin-bottom:8px"><b id="vName"></b><a class="hint" style="cursor:pointer" onclick="fView=null;document.getElementById('vBox').style.display='none'">关闭</a></div><div id="viewer"></div></div>
   </div></section>
   <section class="page" id="p-models"><div class="pad">
     <h2>模型选择</h2>
@@ -1436,7 +1436,7 @@ async function loadModels() {
   if (!d.models.length) box.appendChild(h('div', 'hint', '没找到模型文件（D:\ComfyUI\app\models\checkpoints 里是空的）。'));
 }
 let fOpen = null; const fSel = new Set();
-let fCache = null, fJson = '';
+let fCache = null, fJson = '', fView = null;
 async function loadFiles(fresh) {
   if (fresh) fCache = null;
   if (fCache) paintFiles(fCache);   // 先用上次的列表立刻画出来，再在后台核对，避免点开文件夹时空白一下
@@ -1447,7 +1447,7 @@ function paintFiles(f) {
   const box = $('#fLists'); box.innerHTML = '';
   const note = { 线索: '线索表格（CSV，Excel 能打开）', 草稿: '开发信草稿（未发送）', 任务结果: '任务队列的结果', 图片: 'AI 画的图', 知识库: '手册、资料放这里，AI 就能查', 对话日志: '每段对话都存一份，不小心删了可以从这里找回' };
   if (fOpen && !f[fOpen]) fOpen = null;
-  $('#vBox').style.display = 'none';
+  if (!(fView && fOpen === fView.d && (f[fOpen] || []).some((x) => x.name === fView.n))) { fView = null; $('#vBox').style.display = 'none'; }   // 文件夹列表刷新时（读文件也会触发）不把正在看的文件关掉，之前点开 .md 会闪一下就没了
   if (!fOpen) {
     if (!Object.keys(f).length) box.innerHTML = '<div class="hint">工作文件夹里还没有子文件夹。</div>';
     const ul = document.createElement('ul'); ul.className = 'files';
@@ -1477,7 +1477,7 @@ function paintFiles(f) {
   sec.appendChild(ul); box.appendChild(sec);
   box.querySelectorAll('[data-open]').forEach((b) => b.onclick = () => api('/api/open', { dir: b.dataset.open }));
 }
-async function view(d, n) { const r = await api('/api/file?dir=' + encodeURIComponent(d) + '&name=' + encodeURIComponent(n)); $('#vName').textContent = n; $('#viewer').textContent = r.text.replace(/^﻿/, ''); $('#vBox').style.display = ''; $('#vBox').scrollIntoView(); }
+async function view(d, n) { const r = await api('/api/file?dir=' + encodeURIComponent(d) + '&name=' + encodeURIComponent(n)); fView = { d, n }; $('#vName').textContent = n; $('#viewer').textContent = r.text.replace(/^﻿/, ''); $('#vBox').style.display = ''; $('#vBox').scrollIntoView(); }
 
 // ---------- 事件流 ----------
 function connect() {
