@@ -465,7 +465,8 @@ button,nav a,.cv,.sw,.ma,.send,.plus,.chip,.ghost{transition:background-color .1
 .send.idle{opacity:.5}
 .send.ready{background:var(--accent);color:var(--accent-ink);opacity:1}
 .send.ready:hover{background:#fff}
-.send.stopmode{background:rgba(255,255,255,.16);color:#c8372d;opacity:1}
+.send.stopmode{background:rgba(255,255,255,.16);color:#e5484d;opacity:1}
+.send.stopmode svg{opacity:.75}   /* 10-07 用户：停止键小方块和显卡数字变红时一样的暗红（同色 #e5484d、同 75% 透明度） */
 .send:active{transform:scale(.92)}
 .ma:active,.cbox .cp:active,.sw:active,.chip:active{transform:scale(.96)}
 :focus-visible{outline:1px solid rgba(255,255,255,.5);outline-offset:1px}
