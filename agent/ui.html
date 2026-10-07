@@ -201,7 +201,7 @@ textarea{width:100%;padding:10px 12px;border:1px solid var(--line2);border-radiu
 #wk>span::selection{-webkit-text-fill-color:var(--ink)}   /* 文字本身是透明渐变，选中时显示成正常字色 */
 #wk>span{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}   /* 顺序：已 xx 秒 · 硬件数据 · 正在干什么。长短会变的文字放最后，怎么变都推不动前面的东西 */
 #wk em .gauge{display:inline-flex;align-items:center;padding:4px 1px;margin:-4px 0}
-/* 10-07 用户定的圆环：外径 16px（和汉字一样高，10-07 用户定）、线宽约 2px，按屏幕真实像素取整来画（见 gaugeSvg / gaugeSnap），不发毛。
+/* 10-07 用户定的圆环：外径 14px（10-07 用户：先放大到 16 又定回 14）、线宽约 2px，按屏幕真实像素取整来画（见 gaugeSvg / gaugeSnap），不发毛。
    显卡段：从正下方往左、过顶、到右边，占整圈 70%。空闲时整段灰；开始工作就有一段红从起点往上爬，爬到哪 = 占用多少。
    内存段：固定在右下角 30%，灰白色（比显卡空闲的灰亮），不表示百分比，只有两种状态：正常灰白，快满了整段变黄。整圈连着、不留缝（10-07 用户：断开不清晰）。 */
 #wk em .gauge svg{display:block;overflow:visible}   /* 大小由脚本按屏幕缩放算好写在元素上（见 gaugeSvg） */
@@ -1130,7 +1130,7 @@ const gaugeLast = {};   // 圆环上次的样子（显卡红段画到哪、内�
 // 按屏幕的真实像素来画（10-07 用户：线有毛躁感）：Windows 常开 125%/150% 缩放，按网页尺寸画时线宽是 2.5 这类半个像素、边缘落在两格像素之间，看着发毛。
 // 所以按当前缩放算出整数个真实像素的画布、线宽和外沿半径，圆心落在像素交界上，上下左右四个外沿都正好压在像素格线上
 function gaugeSvg() {
-  const k = devicePixelRatio || 1, vb = 2 * Math.ceil(9 * k), c = vb / 2, w = Math.max(2, Math.round(2 * k)), r = Math.round(8 * k) - w / 2;
+  const k = devicePixelRatio || 1, vb = 2 * Math.ceil(8 * k), c = vb / 2, w = Math.max(2, Math.round(2 * k)), r = Math.round(7 * k) - w / 2;
   const p = (q) => (c - r * Math.sin(q / 50 * Math.PI)).toFixed(3) + ' ' + (c + r * Math.cos(q / 50 * Math.PI)).toFixed(3);
   const arc = (q0, q1) => `M${p(q0)}A${r} ${r} 0 ${q1 - q0 > 50 ? 1 : 0} 1 ${p(q1)}`;
   // 内存段两头各多画 0.7（约 0.3 像素）压到红段底下：红段从正下方起笔、满载时一直走到 70，两段平头碰头的地方各只盖住半个像素，会透出底下的暗灰、看着缺一口（10-07 用户截图）。红段画在最上面，多出来的那点被它盖住
