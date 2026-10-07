@@ -20,6 +20,12 @@ function createCore(cfg, hooks = {}) {
   const askHook = hooks.ask || (async () => false);
   let preOk = false;   // 这一步的几个操作已经合并确认过：工具里再问就直接算同意
   const ask = (q, d) => (preOk ? Promise.resolve(true) : askHook(q, d));
+  // AI 自己用 write_file 新建的文件（临时脚本等）：删它们进回收站不再一个个问（10-07 用户要求：之前删 6 个 _scan*.js 点了 6 次同意）
+  const madeByAI = new Set();
+  const mkKey = (f) => path.resolve(f).toLowerCase();
+  const selfMade = (f) => { try { return madeByAI.has(mkKey(f)) && fs.statSync(f).isFile(); } catch (e) { return false; } };
+  const tzH = () => -new Date().getTimezoneOffset() / 60;   // 本机时区（北京 = +8）
+  const localTime = (d = new Date()) => new Date(d - d.getTimezoneOffset() * 60000).toISOString().slice(0, 19).replace('T', ' ');
   const choose = hooks.choose || (async () => null);   // 选择题：返回 { 问题: 答案 } 或 null（跳过）
   fs.mkdirSync(cfg.workspace, { recursive: true });
   const WS = fs.realpathSync(cfg.workspace);
@@ -28,7 +34,7 @@ function createCore(cfg, hooks = {}) {
   fs.mkdirSync(LOGDIR, { recursive: true });
   fs.mkdirSync(cfg.kbDir, { recursive: true });
 
-  const log = (kind, data) => fs.appendFileSync(path.join(LOGDIR, new Date().toISOString().slice(0, 10) + '.jsonl'), JSON.stringify({ t: new Date().toISOString(), kind, ...data }) + '\n');
+  const log = (kind, data) => fs.appendFileSync(path.join(LOGDIR, new Date().toISOString().slice(0, 10) + '.jsonl'), JSON.stringify({ t: new Date().toISOString(), lt: localTime(), kind, ...data }) + '\n');
 
   // ---------- 围栏 ----------
   function safe(p) {
@@ -242,7 +248,7 @@ function createCore(cfg, hooks = {}) {
     T('find_files', '在电脑上找文件：按文件名（可用 * ? 通配）查找，加 text 还会在文件内容里搜这个词（含 pdf/docx/xlsx/pptx）', { query: { type: 'string', description: '文件名关键词或通配，如 手册 或 *.pdf；留空表示不限文件名' }, path: { type: 'string', description: '从哪个目录开始找，默认工作文件夹；整盘找就写 D:\\' }, text: { type: 'string', description: '可选：文件内容里要包含的词' } }, []),
     T('write_file', '写入（新建或覆盖）电脑上任意位置的文本文件。只有用户明确要求保存成文件时才用；用户只是要一段文字（笑话、文案、翻译……，哪怕说要复制到别处）就直接在回复里写出来，不要建文件', { path: S, content: S }, ['path', 'content']),
     T('edit_file', '修改已有文本文件里的一段文字（把 old 精确替换成 new，old 必须在文件里只出现一次），需用户确认', { path: S, old: S, new: S }, ['path', 'old', 'new']),
-    T('delete_path', '把任意文件或文件夹移入回收站（可恢复），需用户确认', { path: S }, ['path']),
+    T('delete_path', '把任意文件或文件夹移入回收站（可恢复），需用户确认；你自己用 write_file 新建的临时文件删掉不用确认', { path: S }, ['path']),
     T('open_path', '用默认程序打开文件、文件夹、网址，或启动一个程序，需用户确认', { target: S }, ['target']),
     T('run_command', '运行一条 PowerShell 命令（装软件、改设置、批处理、查系统信息……电脑上能做的事基本都能做），需用户确认。timeout 单位秒；background=true 表示启动后不等结果（开程序、跑长任务）', { command: S, cwd: { type: 'string', description: '在哪个目录运行，默认工作文件夹' }, timeout: { type: 'number', description: '最长等待秒数，默认 120，最大 900' }, background: { type: 'boolean' } }, ['command']),
     T('kb_search', '在知识库（用户资料、手册、CRM 资料文档和产品表）里检索，回答产品参数、价格、手册内容前必须先用它，并说出出处', { query: S }, ['query']),
@@ -321,7 +327,9 @@ function createCore(cfg, hooks = {}) {
       const f = abs(p); if (BLOCKED.test(f)) throw new Error('不能写系统目录: ' + f);
       const rel = path.relative(WS, f), inWS = !rel.startsWith('..') && !path.isAbsolute(rel);
       if (!(inWS && !fs.existsSync(f)) && !(await ask(`写入文件 ${shown(f)}（${String(content).length} 字${fs.existsSync(f) ? '，会覆盖已有文件' : ''}）`, { kind: 'write', path: f, preview: cut(content, 600) }))) return '用户拒绝了这次写入。';
+      const isNew = !fs.existsSync(f);
       fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, content, 'utf8');
+      if (isNew) madeByAI.add(mkKey(f));
       return '已写入 ' + shown(f) + `（${String(content).length} 字）`;
     },
     async edit_file({ path: p, old: a, new: b }) {
@@ -347,7 +355,8 @@ function createCore(cfg, hooks = {}) {
       if (f === WS) throw new Error('不能删除工作文件夹本身');
       if (BLOCKED.test(f) || /^[a-z]:\\?$/i.test(f) || f.toLowerCase() === os.homedir().toLowerCase()) throw new Error('这个位置太重要，不删: ' + f);
       if (!fs.existsSync(f)) return '不存在: ' + p;
-      if (!(await ask(`把 ${shown(f)} 移入回收站`, { kind: 'delete', path: f }))) return '用户拒绝了这次删除。';
+      if (!selfMade(f) && !(await ask(`把 ${shown(f)} 移入回收站`, { kind: 'delete', path: f }))) return '用户拒绝了这次删除。';
+      madeByAI.delete(mkKey(f));
       const ps = `Add-Type -AssemblyName Microsoft.VisualBasic; $p=$env:AI_P; if((Get-Item -LiteralPath $p).PSIsContainer){[Microsoft.VisualBasic.FileIO.FileSystem]::DeleteDirectory($p,'OnlyErrorDialogs','SendToRecycleBin')}else{[Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile($p,'OnlyErrorDialogs','SendToRecycleBin')}`;
       await new Promise((res, rej) => execFile('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', ps], { env: { ...process.env, AI_P: f } }, (e, o, er) => (e ? rej(new Error(String(er).slice(0, 200))) : res())));
       return '已移入回收站: ' + shown(f);
@@ -443,6 +452,7 @@ function createCore(cfg, hooks = {}) {
   const SYSTEM = () => `你是 REIZE助手，运行在用户这台 Windows 电脑上的通用 AI 助手，默认用中文回答（用户换语言就跟着换），话越少越好。什么事都可以帮：写作、翻译、查资料、编程、处理文件和表格、整理电脑、装软件、排查故障、操作电脑……不要把自己局限在某个行业或项目上。
 关于用户：他是 REIZE（制袋机、吹膜机等塑料机械，做外贸）的老板，谈到他的业务时你有 CRM 和知识库可查；其他事情照常帮，不要硬往业务上扯。
 现在是 ${new Date().toLocaleString('zh-CN', { hour12: false })}（星期${'日一二三四五六'[new Date().getDay()]}）。电脑：Windows，用户名 ${os.userInfo().username}，用户文件夹 ${os.homedir()}（桌面、文档、下载都在里面），磁盘 ${DRIVES}。
+查时间要分清时区：logs\\*.jsonl 里的 t 和文件名日期是国际时间（UTC），本机时间 = UTC ${tzH() >= 0 ? '+' : ''}${tzH()} 小时，lt 字段才是本机时间（旧日志没有 lt，要自己换算，只换算一次）；blackbox.log、restart.log、Windows 事件日志、Get-Date 都是本机时间。查之前先对一下：要查的时间不能晚于现在。
 ${memory() ? `你记住的关于用户的事（来自 ${MEMF}）：\n${memory()}\n` : '你还没有记住任何关于用户的事。用户说"记住……"，或透露了以后长期有用的偏好、习惯，就用 remember 工具记下来。\n'}工作文件夹是 ${WS}（相对路径从这里算起）。电脑上任何位置的文件你都可以读，路径写绝对路径（如 D:\\ai网站、C:\\Users\\Administrator\\Desktop）；写入、修改、删除（进回收站）、运行命令、打开程序也能做到任何位置，每次都会弹确认。read_file 能直接读 PDF、Word、Excel、PowerPoint、图片；扫描版 PDF 用 pdf_page_image 按页看图。找文件用 find_files（可按文件名、也可按内容搜）。要装软件、改设置、批量处理这类事，用 run_command 写 PowerShell 完成，不要说"做不到"，先想办法试。耗时长的命令用 background=true 或调大 timeout。
 当前${cfg.online ? '联网：开，可以用 web_search 和 fetch_url。' : '联网：关，没有联网工具；如果用户需要联网查资料，请告诉他打开界面上的「联网」开关。'}
 规则：
@@ -623,7 +633,7 @@ ${learnTodo()}
     try {
       if (name === 'write_file') { const f = abs(a.path), rel = path.relative(WS, f), inWS = !rel.startsWith('..') && !path.isAbsolute(rel), ex = fs.existsSync(f); return inWS && !ex ? null : { q: `写入文件 ${shown(f)}（${String(a.content || '').length} 字${ex ? '，会覆盖已有文件' : ''}）`, detail: { kind: 'write', path: f, preview: cut(a.content || '', 600) } }; }
       if (name === 'edit_file') { const f = abs(a.path); return { q: `修改文件 ${shown(f)}`, detail: { kind: 'write', path: f, preview: cut('- ' + a.old + '\n+ ' + a.new, 600) } }; }
-      if (name === 'delete_path') { const f = abs(a.path); return fs.existsSync(f) ? { q: `把 ${shown(f)} 移入回收站`, detail: { kind: 'delete', path: f } } : null; }
+      if (name === 'delete_path') { const f = abs(a.path); return fs.existsSync(f) && !selfMade(f) ? { q: `把 ${shown(f)} 移入回收站`, detail: { kind: 'delete', path: f } } : null; }
       if (name === 'run_command') { const dir = a.cwd ? abs(a.cwd) : WS; return { q: '运行命令: ' + a.command + (dir !== WS ? `\n（在 ${dir} 里运行）` : '') + (a.background ? '\n（后台运行，不等结果）' : ''), detail: { kind: 'command', command: String(a.command || ''), cwd: dir } }; }
       if (name === 'download_file') { const f = abs(a.path); return { q: `下载 ${a.url}\n保存到 ${shown(f)}${fs.existsSync(f) ? '（会覆盖已有文件）' : ''}`, detail: { kind: 'write', path: f, preview: String(a.url || '') } }; }
     } catch (e) {}
