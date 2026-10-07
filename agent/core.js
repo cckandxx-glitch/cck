@@ -459,9 +459,9 @@ ${memory() ? `记住的关于用户的事：\n${memory()}\n` : ''}规则：
   // 超 70%：旧工具结果和旧图片压缩；超 85%：把较早的一半对话让模型压成摘要（和旧摘要合并），原文从记忆里移除。
   // 摘要存成历史里的一条 { role:'system', summary:true }，跟着对话一起保存；发给模型时并进系统提示。
   let lastUsed = 0, subDenied = false;
-  // 学习模式（学习循环开着时）：上下文开小一点（learnCtx，默认 8192），KV 缓存的显存只要平时的 1/4；默认不思考（learnThink）；压缩也更狠——学习的过程记录用户不翻，进度都在文件里
+  // 学习模式（学习循环开着时）：上下文开小一点（learnCtx，默认 16384），KV 缓存的显存只要平时的一半；默认不思考（learnThink）；压缩也更狠——学习的过程记录用户不翻，进度都在文件里
   let lean = false;
-  const ctxN = () => (lean ? cfg.learnCtx || 8192 : cfg.numCtx);
+  const ctxN = () => (lean ? cfg.learnCtx || 16384 : cfg.numCtx);
   const LEAN_RES = 2000;   // 学习模式：单个工具结果最多给多少字
   const realUser = (m) => m.role === 'user' && !String(m.content).startsWith('（这是刚才操作后的屏幕截图');
   const isSummary = (m) => m.role === 'system' && m.summary;
@@ -497,11 +497,11 @@ ${memory() ? `记住的关于用户的事：\n${memory()}\n` : ''}规则：
     const ls = [];
     for (const m of gone) for (const c of m.tool_calls || []) { const a = c.function.arguments || {}; ls.push('- ' + c.function.name + ' ' + String(a.path || a.query || a.url || a.command || '').slice(0, 80)); }
     const t = (prev ? prev + '\n' : '') + '本轮已做过：\n' + ls.join('\n');
-    return t.length > 2000 ? t.slice(0, 600) + '\n…\n' + t.slice(-1400) : t;
+    return t.length > 1200 ? t.slice(0, 300) + '\n…\n' + t.slice(-900) : t;   // 摘要放在系统提示里，越长折叠后剩的空间越少、越快又要压
   };
   // force：用户点了左上角的圈手动压缩——不看用量，除最近一轮外全部压成摘要；返回压掉的轮数（0 = 没东西可压）
   async function compact(force) {
-    const tidyAt = lean ? 0 : 0.7, foldAt = lean ? 0.6 : 0.85, keepN = lean ? 4 : 8;   // 学习模式：每一步都把旧结果截短，用到 60% 就折叠
+    const tidyAt = lean ? 0 : 0.7, foldAt = lean ? 0.8 : 0.85, keepN = lean ? 4 : 8;   // 学习模式：每一步都把旧结果截短，用到 80% 才折叠（10-07：60% 时几乎每一步都在压缩）
     if (!force && lastUsed < ctxN() * tidyAt) return 0;
     let n = 0;
     const keepFrom = Math.max(1, messages.length - keepN);
@@ -631,7 +631,8 @@ ${memory() ? `记住的关于用户的事：\n${memory()}\n` : ''}规则：
     messages.push(userMsg); log('user', { text: userText });
     let lastText = '', denied = false;
     try {
-      for (let step = 0; step < cfg.maxSteps; step++) {
+      const stepCap = opts.loop ? cfg.learnSteps || 40 : cfg.maxSteps;   // 学习一轮最多 40 步就收尾进下一轮，别一轮跑几百步、反复压缩（10-07）
+      for (let step = 0; step < stepCap; step++) {
         checkStop(); trimHistory(); await compact(); checkStop();
         const { content, calls, stats } = await chatOnce(undefined, denied);   // 用户拒绝过：这一轮不给工具，只许说话，不准换办法绕
         if (stats && stats.prompt_eval_count) lastUsed = stats.prompt_eval_count + (stats.eval_count || 0);
