@@ -413,6 +413,10 @@ header .stop.stopping.slow{animation:stopSlow .7s ease-in-out infinite}
 .confirm b{color:var(--ink);font-weight:500}
 .confirm b::before{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;background:#e5483d;margin-right:8px;vertical-align:1px}
 #choiceBar{border-bottom:0;background:rgba(200,55,45,.20)}
+/* 10-07 只读查看：AI 忙时点历史对话，上方一条提示；查看中不显示撤回、重新回答 */
+#peekBar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 24px;font-size:var(--f2);background:rgba(127,127,127,.14)}
+#peekBar #peekText{flex:1;min-width:200px}
+#chat.peek .ma.ed,#chat.peek .ma.rt{display:none}
 .inp,textarea{border:0;background:rgba(255,255,255,.07)}
 .inp:focus,textarea:focus{background:rgba(255,255,255,.11)}
 .cbpop{display:none;position:absolute;left:0;top:100%;margin-top:4px;min-width:100%;max-height:260px;overflow:auto;background:var(--bg);border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.45);padding:4px;z-index:60;white-space:nowrap}
@@ -530,6 +534,7 @@ html.loading body{visibility:hidden}
   <div id="choiceBar" style="display:none"><span id="choiceText"></span><button class="btn stop" id="choiceForce">强制上线</button><button class="btn" id="choiceNot">这不是游戏</button><button class="btn" id="choiceCancel">取消（游戏关闭后自动上线）</button><button class="btn" id="choiceAck">知道了</button></div>
   <section class="page on" id="p-chat">
     <div id="gbar"><span id="gpuT"></span><span id="memT"></span><span id="actT"></span></div>
+    <div id="peekBar" style="display:none"><span id="peekText"></span><button class="btn pri" id="peekGo" style="display:none">在这里继续聊</button><button class="btn" id="peekBack">回到当前任务</button></div>
     <div id="chat"></div>
     <div class="composer">
       <button id="toBottom" type="button" title="回到最新">↓</button>
@@ -739,14 +744,14 @@ let convHits = new Set(), convQv = '';   // 搜索框里的字，和服务器按
 }); }
 function paintConvs() {
   const all = S.convs || [], list = convQv ? all.filter((c) => String(c.title || '').toLowerCase().includes(convQv) || convHits.has(c.id)) : all;
-  const t = page === 'chat' ? (hasMsgs() && S.curTitle ? S.curTitle : '新对话') : ({ queue: '任务队列', leads: '线索挖掘', files: '文件' }[page]);
+  const t = page === 'chat' ? (peek ? peek.title + '（只读查看）' : hasMsgs() && S.curTitle ? S.curTitle : '新对话') : ({ queue: '任务队列', leads: '线索挖掘', files: '文件' }[page]);
   document.querySelector('header .title').textContent = t;
   document.getElementById('newConvBtn').classList.toggle('on', page === 'chat' && !hasMsgs());
-  const key = JSON.stringify([list, S.cur, page, hasMsgs(), convQv]); if (key === convKey) return; convKey = key;
+  const key = JSON.stringify([list, S.cur, page, hasMsgs(), convQv, peek && peek.id]); if (key === convKey) return; convKey = key;
   const box = $('#convList'); box.innerHTML = '';
   if (!list.length) { box.innerHTML = '<div class="hint" style="padding:6px 14px">' + (convQv ? '没有找到' : '还没有历史对话') + '</div>'; return; }
   list.forEach((c) => {
-    const d = h('div', 'cv' + (page === 'chat' && c.id === S.cur ? ' on' : ''), '<span class="t"></span><button class="x" title="删除这个对话">×</button>');
+    const d = h('div', 'cv' + (page === 'chat' && c.id === (peek ? peek.id : S.cur) ? ' on' : ''), '<span class="t"></span><button class="x" title="删除这个对话">×</button>');
     d.querySelector('.t').textContent = c.title || '新对话'; d.title = c.title || '';
     d._conv = c; d.onclick = () => openConv(c.id);
     d.querySelector('.x').onclick = (e) => { e.stopPropagation(); delConv(c); };
@@ -754,10 +759,42 @@ function paintConvs() {
   });
 }
 async function convCall(p, id) { try { await api('/api/conv/' + p, { id }); } catch (e) { uiAlert(e.message); return false; } await refresh(); return true; }
-async function newConv() { showPage('chat'); if (!(await convCall('new'))) return; $('#inp').focus(); }
-async function openConv(id) { if (id === S.cur) { if (page !== 'chat') showPage('chat'); return; } showPage('chat'); await convCall('open', id); }   // 点的就是当前对话（比如从文件页回来）只切页面，不打后端，忙的时候也不会被挡
-async function delConv(c) { if (!(await uiConfirm('删除对话「' + (c.title || '新对话') + '」？删除后不能恢复。', true))) return; await convCall('delete', c.id); }
+async function newConv() { showPage('chat'); if (peek && !S.busy) endPeek(true); if (!(await convCall('new'))) return; $('#inp').focus(); }
+async function openConv(id) {
+  if (peek && id === S.cur) { showPage('chat'); return endPeek(); }
+  if (id === S.cur && !peek) { if (page !== 'chat') showPage('chat'); return; }   // 点的就是当前对话（比如从文件页回来）只切页面，不打后端，忙的时候也不会被挡
+  showPage('chat');
+  if (S.busy && id !== S.cur) return peekConv(id);   // 10-07 AI 正忙：不切换，只读查看
+  if (peek) endPeek(true);
+  await convCall('open', id);
+}
+// ---------- 只读查看（10-07）：AI 在别的对话里干活时，点历史对话只看不切换，正在跑的任务不受影响 ----------
+let peek = null;   // { id, title }
+async function peekConv(id) {
+  let r; try { r = await api('/api/conv/view?id=' + encodeURIComponent(id)); } catch (e) { uiAlert(e.message); return; }
+  peek = { id: r.id, title: r.title || '新对话' };
+  closeLive(); const w = document.getElementById('wk'); if (w) w.remove();
+  chat.classList.add('peek'); chat.innerHTML = ''; $('#actT').textContent = '';
+  window.__loadingChat = true;
+  (r.tr || []).forEach((it) => { if (it.role === 'confirm' && !it.answered) it = { ...it, answered: '已过期' }; if (it.role === 'ask' && !it.answered) return; add(it); });
+  window.__loadingChat = false;
+  chat.scrollTop = chat.scrollHeight; paintPeek(); convKey = ''; paintConvs();
+}
+async function endPeek(quiet) {
+  if (!peek) return; peek = null; chat.classList.remove('peek'); paintPeek(); convKey = '';
+  if (quiet) return;
+  await refresh(); loadChat();
+}
+function paintPeek() {
+  const b = $('#peekBar'); b.style.display = peek ? 'flex' : 'none'; if (!peek) return;
+  $('#peekText').textContent = S.busy ? '只读查看「' + peek.title + '」。AI 正在当前任务里忙（' + S.busy + '），做完后才能在这个对话里继续聊；正在跑的任务不受影响。' : '只读查看「' + peek.title + '」。AI 已经空下来了，可以切换到这个对话接着聊。';
+  $('#peekGo').style.display = S.busy ? 'none' : '';
+}
+$('#peekBack').onclick = () => endPeek();
+$('#peekGo').onclick = async () => { const id = peek && peek.id; if (!id) return; endPeek(true); if (!(await convCall('open', id))) { await refresh(); loadChat(); } };
+async function delConv(c) { if (!(await uiConfirm('删除对话「' + (c.title || '新对话') + '」？删除后不能恢复。', true))) return; if (peek && peek.id === c.id) await endPeek(); await convCall('delete', c.id); }
 function loadChat() {
+  if (peek) return;   // 只读查看中：别把当前任务的记录画进来，回到当前任务时再画
   chat.innerHTML = ''; $('#actT').textContent = ''; window.__loadingChat = true; (S.tr || []).forEach(add); window.__loadingChat = false;
   (S.pending || []).forEach((p) => { if (!chat.querySelector('.confirm[data-cid="' + p.id + '"]')) add({ role: 'confirm', id: p.id, q: p.q, detail: p.detail }); });
   chat.scrollTop = chat.scrollHeight; paintConvs(); if (typeof gpuPaint === 'function') gpuPaint();
@@ -776,7 +813,7 @@ function paint() {
   $('#swNet').classList.toggle('on', S.online); $('#swNet span').textContent = '联网';
   $('#swDesk').classList.toggle('on', S.desktop); $('#swDesk span').textContent = '桌面';
   $('#swThink').classList.toggle('on', S.think); $('#swThink span').textContent = '思考';
-  paintConvs();
+  paintConvs(); paintPeek();
   $('#status').textContent = '';
   $('#sendBtn').disabled = !!S.busy && S.busy !== '对话' && S.busy !== '学习循环'; $('#qGo').disabled = !!S.busy; $('#lGo').disabled = !!S.busy; $('#lStop').disabled = S.busy !== '线索挖掘';
   $('#foot').innerHTML = '<svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>' + esc(S.ws || ''); $('#foot').title = '工作文件夹：' + (S.ws || '');
@@ -1042,6 +1079,7 @@ document.addEventListener('drop', (e) => { if (e.dataTransfer && e.dataTransfer.
 async function send() {
   const t = $('#inp').value.trim(); if ((!t && !atts.length) || (S.busy && S.busy !== '对话' && S.busy !== '学习循环')) return;
   hPush(t);
+  if (peek) await endPeek();   // 只读查看中发消息：先回到当前任务，消息发到正在干活的那个对话
   const files = atts.splice(0); paintAtts();
   $('#inp').value = ''; grow(); try { localStorage.removeItem('inpDraft'); } catch (e) {} const q = quoted; setQuote(null);
   try { await api('/api/send', { text: t, quote: q, files: files.map((a) => ({ name: a.name, b64: a.b64 })), imgs: files.map((a) => a.img).filter(Boolean) }); }
@@ -1114,6 +1152,7 @@ let wkCyc = -1, wkCur = 0, wkNxt = 1, wkGA = null, wkGB = null;
 const wk = { t0: 0, last: 0, label: '' };
 setInterval(() => {
   let el = document.getElementById('wk');
+  if (peek) { if (el) el.remove(); return; }   // 只读查看中不显示当前任务的进度动画
   if (!S.busy) { wk.t0 = 0; wk.kind = ''; if (el) el.remove(); return; }
   if (!wk.t0 || wk.kind !== S.busy) { wk.t0 = wk.last = Date.now(); if (S.busySince && S.busySince <= wk.t0) wk.t0 = S.busySince; wk.label = ''; wk.kind = S.busy; if (S.busySince && Date.now() - S.busySince > 2000) wk.last = Date.now() - 2000; }   // 刷新页面时 AI 早就在忙：别再藏 1.5 秒   // 任何要长时间运算的活（对话、任务队列、线索挖掘、上线下线）都显示
   if (!el) el = h('div', '', '<i></i><span></span><b></b>'), el.id = 'wk', wkBalls(el.firstChild);
@@ -1394,6 +1433,9 @@ async function view(d, n) { const r = await api('/api/file?dir=' + encodeURIComp
 // ---------- 事件流 ----------
 function connect() {
   const es = new EventSource('/api/events');
+  // 只读查看中：当前任务的实时内容先不往屏幕上画（服务器都记着），回到当前任务时一次画全
+  { const PEEK_SKIP = new Set(['token', 'user', 'tool', 'toolresult', 'notice', 'noticeupd', 'error', 'stopped', 'done', 'confirm', 'ask', 'ask_done', 'confirm_done', 'cleared', 'conv', 'shot']);
+    const al = es.addEventListener.bind(es); es.addEventListener = (t, f) => al(t, (e) => { if (peek && PEEK_SKIP.has(t)) { if (t === 'done' || t === 'stopped' || t === 'conv') refresh(); return; } f(e); }); }
   es.addEventListener('token', (e) => { $('#actT').textContent = ''; const d = JSON.parse(e.data); liveAI(d.text, d.mid); });
   es.addEventListener('user', (e) => { closeLive(); add(Object.assign({ role: 'user' }, JSON.parse(e.data))); });
   es.addEventListener('tool', (e) => { $('#actT').textContent = ''; closeLive(); add(Object.assign({ role: 'tool' }, JSON.parse(e.data))); });
