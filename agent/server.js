@@ -41,7 +41,7 @@ function stopLearn(reason) {
   learn.on = false; learn.stopped = true;
   core.stop(); skipAsks();
   for (const [id, p] of pending) { pending.delete(id); p.resolve(false); bc('confirm_done', { id, answered: '已拒绝' }); }
-  notice('学习循环已停止' + (reason ? '（' + reason + '）' : '') + '，进行到第 ' + learn.round + ' 轮。');
+  notice('已停止学习。');
   bc('state', {});
 }
 const isLearnCmd = (t) => /^(请|帮我|你|开始)?(继续)?(学习|自学|学)(吧|一下|一会|一会儿)?$/.test(String(t || '').trim());
@@ -119,19 +119,17 @@ function gpuStart() {
 function gpuStop() { if (gpuProc) { try { gpuProc.kill(); } catch (e) {} gpuProc = null; } }
 process.on('exit', gpuStop);
 const notice = (text) => { push({ role: 'notice', text }); bc('notice', { text }); };
-// 「正在自动上线」这行：模型真正上线后，原地改成「AI 已上线」（界面和历史记录都改）
+// 自动上线：不在聊天里留话，只在底部状态行显示「上线中…」，上线后自动消失（2026-10-07 用户：这类状态话越少越好）
 function bootNotice() {
-  const afterImg = core.imgUnloaded; core.imgUnloaded = false;
-  const it = push({ role: 'notice', text: afterImg ? '刚才画图时聊天模型让出了显存，正在重新载入，约需 7 秒…' : userOffline ? 'AI 当前下线，正在自动上线，约需 7 秒…' : '聊天模型正在载入，约需 7 秒…' }); bc('notice', { text: it.text });
-  const t0 = Date.now();
+  core.imgUnloaded = false;
+  const t = '上线中…'; wkLabel = t; bc('state', {});
   (async () => {
     for (let i = 0; i < 80; i++) {
       await new Promise((r) => setTimeout(r, 500));
       const st = await pw.status();
-      if (st.state === 'down') return;
-      if (st.state === 'on') { it.text = 'AI 已上线（用了 ' + ((Date.now() - t0) / 1000).toFixed(1) + ' 秒），开始回答。'; dirty = true; bc('noticeupd', { mid: it.mid, text: it.text }); return; }
+      if (st.state === 'down' || st.state === 'on') break;
     }
-  })().catch(() => {});
+  })().catch(() => {}).finally(() => { if (wkLabel === t) { wkLabel = ''; bc('state', {}); } });
 }
 
 let wkLabel = '';   // 界面底部「正在干什么」那行字：记在服务端，页面刷新后还能接上
@@ -178,7 +176,7 @@ function ask(q, detail) {
 }
 
 function choose(questions) {
-  if (learn.on) { notice('学习循环中，AI 的提问已自动跳过：' + questions.map((q) => q.question).join(' / ')); return Promise.resolve(null); }
+  if (learn.on) return Promise.resolve(null);   // 学习中 AI 的提问直接跳过，不提示
   if (unattended) { notice('无人值守，AI 的提问已跳过：' + questions.map((q) => q.question).join(' / ')); return Promise.resolve(null); }
   const id = ++cid;
   return new Promise((resolve) => {
@@ -265,9 +263,9 @@ ${text}` : text;
     if (act) { const r = act === 'off' ? await pw.off() : await pw.on(); notice(r.text); if (r.ok) auto.manual(act); return; }
     unattended = false; allowAll = false; core.resetStop();
     // 学习循环口令：说"请学习/继续学"就一直学，直到说"停止学习"（2026-10-06 用户设定）
-    if (isStopLearnCmd(text)) { if (learn.on) { stopLearn('你说"停止学习"'); } else notice('现在没有在学。说"请学习"我就开始学习循环。'); return; }
+    if (isStopLearnCmd(text)) { if (learn.on) { stopLearn('你说"停止学习"'); } else notice('没在学习。'); return; }
     if (isLearnCmd(text)) {
-      if (learn.on) { notice('学习循环已经在跑了（第 ' + learn.round + ' 轮），不用重复说。'); return; }
+      if (learn.on) { notice('已在学习中。'); return; }
       runLearnLoop(mtext); return;
     }
     if ((await pw.status()).state === 'off') {
@@ -282,7 +280,6 @@ ${text}` : text;
 async function runLearnLoop(firstText) {
   learn.on = true; learn.stopped = false; learn.round = 0;
   busy = '学习循环'; bc('state', {});
-  notice('学习循环开始：每轮学完自动开下一轮，只在聊天框汇报进度。说"停止学习"或点急停才停。');
   try {
     if ((await pw.status()).state === 'off') bootNotice();
     let first = true, fails = 0;
@@ -291,10 +288,9 @@ async function runLearnLoop(firstText) {
       core.resetStop();
       const prompt = first ? firstText : LEARN_PROMPT();
       first = false;
-      if (learn.round > 1) notice('—— 学习循环第 ' + learn.round + ' 轮开始 ——');
       const before = core.getHistory();
       let failed = false;
-      try { await core.turn(prompt); fails = 0; } catch (e) { if (e.name !== 'StopError') { failed = true; fails++; notice('学习循环出错：' + e.message); } }
+      try { await core.turn(prompt); fails = 0; } catch (e) { if (e.name !== 'StopError') { failed = true; fails++; notice('学习出错：' + e.message); } }
       if (!learn.on) break;
       if (learn.stopped) break;
       let waitMs = 2000;   // 本轮结束，等 2 秒喘口气再开下一轮（期间说"停止学习"或急停都能打断）
@@ -305,7 +301,6 @@ async function runLearnLoop(firstText) {
           let ok = false;
           try { ok = (await core.compactNow()) > 0; } catch (e) {}
           if (!ok) core.setMessages([]);
-          notice('学习循环连续出错 ' + fails + ' 次，已' + (ok ? '压缩' : '清空') + '对话上下文，接着学。');
           fails = 0;
         }
         waitMs = Math.min(300000, 30000 * Math.max(1, fails));   // 等一会再试，给 Ollama 恢复的时间，别一出错就连环重试
@@ -316,7 +311,6 @@ async function runLearnLoop(firstText) {
     learn.on = false;
     if (busy === '学习循环') busy = null;
     persist(); bc('state', {});
-    if (!learn.stopped) notice('学习循环结束，共 ' + learn.round + ' 轮。');
   }
 }
 

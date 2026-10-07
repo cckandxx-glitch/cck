@@ -478,14 +478,13 @@ ${memory() ? `你记住的关于用户的事（来自 ${MEMF}）：\n${memory()}
         const cut = force ? users[users.length - 1] : users[Math.max(1, Math.floor(users.length / 2))];   // 自动：至少留最近一半的轮次；手动：只留最近一轮。当前这一轮永远不动
         const gone = messages.slice(start, cut), prev = start === 2 ? messages[1].content : '';
         n = gone.filter(realUser).length;
-        emit('notice', { text: force ? '正在手动压缩对话，稍等…' : '对话太长，正在把较早的内容压缩成摘要，稍等…' });
         let sum = '';
         try { sum = await summarize(gone, prev); } catch (e) { if (e.name === 'AbortError' && stopped) throw e; log('summary_fail', { error: e.message }); }
         const old = start === 2 ? messages[1] : null;
         const archive = [...((old && old.archive) || []), ...gone.map((m) => { const c = { ...m }; delete c.images; return c; })];
         messages.splice(1, cut - 1, { role: 'system', summary: true, content: sum || (old ? old.content : ''), archive });   // 摘要失败时旧摘要照留
         emit('dropped', { users: n });
-        emit('notice', { text: sum ? `已把较早的 ${n} 轮对话压缩成摘要，AI 还记得要点，需要原话时它会自己翻（界面上的记录还在）。` : '摘要没生成出来，较早的内容已移出 AI 的记忆，需要时它可以翻旧记录找回（界面上的记录还在）。' });
+        if (!sum) emit('notice', { text: '摘要失败，旧内容已移出记忆。' });   // 压缩成功不提示（2026-10-07 用户：这类状态话越少越好）
         if (sum) log('summary', { text: sum });
       }
     }
@@ -602,7 +601,7 @@ ${memory() ? `你记住的关于用户的事（来自 ${MEMF}）：\n${memory()}
           }
         }
       }
-      emit('notice', { text: `已达到单次任务最大步数（${cfg.maxSteps}），本轮结束${opts.sub ? '，自动进入下一轮' : '，停下来等你指示'}。` });
+      if (!opts.sub) emit('notice', { text: `已到最大步数（${cfg.maxSteps}）。` });
     } catch (e) {
       if (opts.sub && (e.name === 'AbortError' || e.name === 'StopError')) throw e;
       if (e.name === 'AbortError' || e.name === 'StopError') { emit('stopped', {}); log('stop', {}); return lastText; }
