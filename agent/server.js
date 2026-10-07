@@ -34,11 +34,14 @@ const DANGER = /\b(Remove-Item|rm|rmdir|del|erase|format|diskpart|shutdown|Resta
 const isRisky = (d) => !!d && (d.kind === 'delete' || (d.kind === 'command' && DANGER.test(String(d.command || ''))));
 const queue = { items: [], cancel: false };
 // ---------- 学习循环（2026-10-06 用户设定）：说"请学习/继续学"就一直跑，每轮学完自动开下一轮，只在聊天框汇报，不弹确认；说"停止学习"或点急停才停 ----------
-const learn = { on: false, round: 0, stopped: false };
+const learn = { on: false, round: 0, stopped: false, steer: [] };   // steer：学习中用户发来的话，下一轮按它学（2026-10-07 用户：只有"停止学习"和急停能打断）
+// 学习循环开着时记到 learn.json：窗口关了 / 服务重启后自动接着学（state.json 归 auto.js 整份覆盖，不能放那里）
+const LEARNF = path.join(__dirname, 'learn.json');
+const saveLearn = () => { try { fs.writeFileSync(LEARNF, JSON.stringify({ on: learn.on, round: learn.round })); } catch (e) {} };
 const LEARN_PROMPT = () => '（学习循环第 ' + (learn.round + 1) + ' 轮：本轮按自学计划深挖 1~2 个主题。本轮结束时，用简短的进度汇报收尾：学了哪些主题、结果存到哪个文件、下一轮准备学什么。不要问问题、不要等指示——下一轮会自动开始，直到用户说"停止学习"。）';
 function stopLearn(reason) {
   if (!learn.on) return;
-  learn.on = false; learn.stopped = true;
+  learn.on = false; learn.stopped = true; learn.steer.length = 0; saveLearn();
   core.stop(); skipAsks();
   for (const [id, p] of pending) { pending.delete(id); p.resolve(false); bc('confirm_done', { id, answered: '已拒绝' }); }
   notice('学习循环已停止' + (reason ? '（' + reason + '）' : '') + '，进行到第 ' + learn.round + ' 轮。');
@@ -153,7 +156,7 @@ function onEvent(type, d) {
   else if (type === 'toolresult') push({ role: 'result', name: d.name, text: d.text });
   else if (type === 'notice') push({ role: 'notice', text: d.text });
   else if (type === 'error') push({ role: 'notice', text: '出错: ' + d.text });
-  else if (type === 'stopped') push({ role: 'notice', text: '已急停。' });
+  else if (type === 'stopped') push({ role: 'notice', text: learn.on && learn.steer.length ? '这一轮先停在这里，马上按你的话开下一轮。' : '已急停。' });
   else if (type === 'lead') { leadLog.push(d); if (leadLog.length > 400) leadLog.shift(); }
   if (type === 'done' || type === 'stopped' || type === 'error') persist();
   bc(type, d);
@@ -279,8 +282,8 @@ ${text}` : text;
   finally { if (busy === '对话') busy = null; allowAll = false; persist(); bc('state', {}); }
 }
 
-async function runLearnLoop(firstText) {
-  learn.on = true; learn.stopped = false; learn.round = 0;
+async function runLearnLoop(firstText, startRound = 0) {
+  learn.on = true; learn.stopped = false; learn.round = startRound; learn.steer.length = 0; saveLearn();
   busy = '学习循环'; bc('state', {});
   notice('学习循环开始：每轮学完自动开下一轮，只在聊天框汇报进度。说"停止学习"或点急停才停。');
   try {
@@ -289,14 +292,17 @@ async function runLearnLoop(firstText) {
     while (learn.on) {
       learn.round++;
       core.resetStop();
-      const prompt = first ? firstText : LEARN_PROMPT();
-      first = false;
+      const steer = learn.steer.splice(0);
+      const prompt = steer.length ? '（学习循环第 ' + learn.round + ' 轮。用户在学习中发来了下面的话，本轮先按它做，做完照常用简短进度汇报收尾，不要问问题、不要等指示——下一轮会自动开始，直到用户说"停止学习"。）\n' + steer.join('\n')
+        : first && firstText ? firstText : LEARN_PROMPT();
+      first = false; saveLearn();
       if (learn.round > 1) notice('—— 学习循环第 ' + learn.round + ' 轮开始 ——');
       const before = core.getHistory();
       let failed = false;
       try { await core.turn(prompt); fails = 0; } catch (e) { if (e.name !== 'StopError') { failed = true; fails++; notice('学习循环出错：' + e.message); } }
       if (!learn.on) break;
       if (learn.stopped) break;
+      if (learn.steer.length) continue;   // 用户刚发了话打断了这一轮：马上按它开下一轮
       let waitMs = 2000;   // 本轮结束，等 2 秒喘口气再开下一轮（期间说"停止学习"或急停都能打断）
       if (failed) {
         // 出错的这一轮没有回答：把它留下的提示词撤掉，否则每次失败都多压一条，下一轮更慢、更容易再超时（10-06 连挂 21 轮就是这样）
@@ -313,7 +319,7 @@ async function runLearnLoop(firstText) {
       for (let i = 0; i < waitMs / 100 && learn.on; i++) await new Promise((r) => setTimeout(r, 100));
     }
   } finally {
-    learn.on = false;
+    learn.on = false; if (learn.stopped) saveLearn();   // 只有用户叫停才清掉 learn.json；进程被关掉的话下次启动接着学
     if (busy === '学习循环') busy = null;
     persist(); bc('state', {});
     if (!learn.stopped) notice('学习循环结束，共 ' + learn.round + ' 轮。');
@@ -452,7 +458,15 @@ const server = http.createServer(async (req, res) => {
         if (busy === '学习循环') {
           const t2 = String(b.text || '').trim();
           if (isStopLearnCmd(t2)) { const um = push({ role: 'user', text: t2, raw: t2 }); bc('user', { text: t2, mid: um.mid }); stopLearn('你说"停止学习"'); return json(res, 200, { ok: true }); }
-          stopLearn('你发了新消息');
+          if (t2 && !(b.files && b.files.length) && !(b.imgs && b.imgs.length)) {
+            // 学习中发的话不再停掉循环（停了就变成普通对话，会弹确认）：打断当前这一轮，下一轮按这句话学，循环照跑、照样不弹确认
+            const um = push({ role: 'user', text: t2, raw: t2 }); bc('user', { text: t2, mid: um.mid });
+            if (isLearnCmd(t2)) { notice('学习循环已经在跑了（第 ' + learn.round + ' 轮），不用重复说。'); return json(res, 200, { ok: true }); }
+            learn.steer.push(t2.slice(0, 2000)); core.stop();
+            notice('收到，学习循环不中断：下一轮按你这句话学。说"停止学习"或点急停才会停。');
+            return json(res, 200, { ok: true });
+          }
+          stopLearn('你发了带附件的消息');   // 带文件/图片的消息要走普通对话处理附件
           for (let i = 0; i < 300 && busy === '学习循环'; i++) await new Promise((r) => setTimeout(r, 100));   // 等当前轮真正收尾，再处理这条消息
         }
         if (busy) return json(res, 409, { error: busyMsg('发送新消息') });
@@ -626,6 +640,9 @@ server.listen(PORT, '127.0.0.1', async () => {
   if (st.state === 'off') userOffline = true;   // 刚启动时模型不在显存里 = 下线；不记这个，界面会把「没人下线过」当成在线显示 ON
   console.log(`REIZE助手 网页界面已启动\n地址: ${url}\nAI: ${st.state === 'on' ? '在线' : st.state === 'off' ? '下线' : 'Ollama 服务没有运行'}   联网: ${cfg.online ? '开' : '关'}   自动模式: ${auto.get().on ? '开' : '关'}\n关闭这个窗口(模型会一起下线) = 停止助手。`);
   if (!process.argv.includes('--no-open')) openUi(url);
+  // 上次关窗口/重启时学习循环还开着（用户没说停）：接着学
+  let lj = null; try { lj = JSON.parse(fs.readFileSync(LEARNF, 'utf8')); } catch (e) {}
+  if (lj && lj.on && !busy) { notice('上次关闭时学习循环还在跑（第 ' + (lj.round || 0) + ' 轮），接着学。'); runLearnLoop(null, lj.round || 0); }
 });
 server.on('error', (e) => {
   if (e.code === 'EADDRINUSE') {

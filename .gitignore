@@ -9,3 +9,4 @@ __pycache__/
 node_modules/
 Ollama/
 安装包/
+learn.json
