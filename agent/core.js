@@ -554,7 +554,14 @@ ${memory() ? `记住的关于用户的事：\n${memory()}\n` : ''}规则：
     const body = { model: cfg.model, messages: sendMsgs(), ...(noTools ? {} : { tools: allTools() }), stream: true, think: lean ? !!cfg.learnThink : cfg.think, keep_alive: -1, options: { num_ctx: ctxN(), ...(extraOpts || {}) } };
     let r;
     for (let tryN = 0; ; tryN++) {   // Ollama 推理进程偶尔崩一下（500 / 连不上），自己会重启：等几秒重试一次，别让用户重发
-      try { r = await fetch(cfg.ollama + '/api/chat', { method: 'POST', signal: abortCtl.signal, body: JSON.stringify(body) }); } catch (e) { if (e.name === 'AbortError' || tryN >= 1) throw e; await new Promise((ok) => setTimeout(ok, 4000)); checkStop(); continue; }
+      try { r = await fetch(cfg.ollama + '/api/chat', { method: 'POST', signal: abortCtl.signal, body: JSON.stringify(body) }); }
+      catch (e) {
+        if (e.name === 'AbortError') throw e;
+        // 连不上（fetch failed）多半是 Ollama 服务整个没了：第一次等 4 秒，之后让后台把 Ollama 拉起来再试（10-07 急停后发「继续」直接报 fetch failed）
+        if (tryN >= 2) throw new Error('连不上 Ollama（服务崩了或被关了），重新启动它也没成功。可以点「重试」，还不行就关掉助手重开。');
+        if (tryN === 0) await new Promise((ok) => setTimeout(ok, 4000)); else if (hooks.revive) await hooks.revive();
+        checkStop(); continue;
+      }
       if (r.status >= 500 && tryN < 1) { await new Promise((ok) => setTimeout(ok, 4000)); checkStop(); continue; }
       break;
     }

@@ -34,7 +34,7 @@ const DANGER = /\b(Remove-Item|rm|rmdir|del|erase|format|diskpart|shutdown|Resta
 const isRisky = (d) => !!d && (d.kind === 'batch' ? (d.items || []).some((x) => isRisky(x.detail)) : d.kind === 'delete' || (d.kind === 'command' && DANGER.test(String(d.command || ''))));
 const queue = { items: [], cancel: false };
 // ---------- 学习循环（2026-10-06 用户设定）：说"请学习/继续学"就一直跑，每轮学完自动开下一轮，只在聊天框汇报，不弹确认；说"停止学习"或点急停才停 ----------
-const learn = { on: false, round: 0, stopped: false, inbox: [], yielding: false, since: 0 };
+const learn = { on: false, round: 0, stopped: false, inbox: [], yielding: false, since: 0, resumable: false };   // resumable：刚急停/停止了学习，这时只说「继续」也算继续学习
 // 10-07 用户：开着助手时 24 小时不停学，直到说"停止学习"；但关掉助手后不自动接着学，要用户再说一次"继续学习"。
 // learn.json 只是「正在学」的标记，给外壳用（学习中不让电脑睡眠、关窗先问一句）；后台一启动、一退出都删掉
 const LEARNF = path.join(__dirname, 'learn.json');
@@ -44,7 +44,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const LEARN_PROMPT = () => '（学习第 ' + learn.round + ' 轮：按自学计划学 1~2 个主题，存进知识库。最后只写一行：学了什么 → 存在哪 → 下一轮学什么。）';
 function stopLearn(reason) {
   if (!learn.on) return;
-  learn.on = false; learn.stopped = true; learn.inbox = []; saveLearn(false);
+  learn.on = false; learn.stopped = true; learn.resumable = true; learn.inbox = []; saveLearn(false);
   core.stop(); skipAsks();
   for (const [id, p] of pending) { pending.delete(id); p.resolve(false); bc('confirm_done', { id, answered: '已拒绝' }); }
   notice('学习循环已停止' + (reason ? '（' + reason + '）' : '') + '，进行到第 ' + learn.round + ' 轮。');
@@ -195,7 +195,7 @@ function choose(questions) {
   });
 }
 
-const core = createCore(cfg, { ask, choose, emit: onEvent });
+const core = createCore(cfg, { ask, choose, emit: onEvent, revive: async () => { notice('连不上 Ollama，正在重新启动它…'); await ensureOllama(); } });
 newConv();
 const pw = power.make(cfg);
 // 记「有人让 AI 下线过」：点按钮、对话里说下线、自动模式因游戏让出，都走 pw.off；上线或模型重新在显存里就清掉。界面显示据此只分在线 / 下线两种
@@ -274,11 +274,16 @@ ${text}` : text;
     unattended = false; allowAll = false; core.resetStop();
     // 学习循环口令：说"请学习/继续学"就一直学，直到说"停止学习"（2026-10-06 用户设定）
     if (isStopLearnCmd(text)) { if (learn.on) { stopLearn('你说"停止学习"'); } else notice('现在没有在学。说"请学习"我就开始学习循环。'); return; }
-    if (isLearnCmd(text)) {
+    // 10-07：急停学习后只说「继续」，用户的意思是接着学，不是让 AI 接着聊
+    const resume = !learn.on && learn.resumable && /^(继续|接着|接着来|继续吧|接着学|继续学)[。!！]?$/.test(String(text).trim());
+    if (!isLearnCmd(text) && !resume) learn.resumable = false;
+    if (isLearnCmd(text) || resume) {
       if (learn.on) { notice('学习循环已经在跑了（第 ' + learn.round + ' 轮），不用重复说。'); return; }
-      runLearnLoop(mtext).catch((e) => { bbS('学习循环异常退出', e); notice('学习循环异常退出：' + e.message); }); return;   // 不接住的话一个意外错误就会让整个后台崩掉（unhandledRejection → exit）
+      runLearnLoop(resume ? '继续学习' : mtext).catch((e) => { bbS('学习循环异常退出', e); notice('学习循环异常退出：' + e.message); }); return;   // 不接住的话一个意外错误就会让整个后台崩掉（unhandledRejection → exit）
     }
-    if ((await pw.status()).state === 'off') {
+    const st0 = await pw.status();
+    if (st0.state === 'down') { notice('Ollama 服务没在运行，正在重新启动它…'); await ensureOllama(); }   // 学习循环里本来就有这一步，普通聊天之前没有，急停后发「继续」就直接 fetch failed
+    else if (st0.state === 'off') {
       const g = auto.blocking(); if (g) { offerForce(g, mtext); return; }
       bootNotice();
     }
