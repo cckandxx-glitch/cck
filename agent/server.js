@@ -350,7 +350,8 @@ async function runLearnLoop(firstText) {
         learn.round++; learn.step = 0; learn.did = { q: new Set(), f: new Set() }; saveLearn(true);
         busySince = Date.now(); bc('state', {});   // 计时按每一轮算，不再从开始学习一直累加
         core.resetStop();
-        const prompt = first ? firstText : LEARN_PROMPT();
+        // 上一轮出错（多半是一次写太长超时）：提醒它分段写，不然下一轮照样写同一大段、照样超时，一直原地重来（10-07 写英文话术那轮）
+        const prompt = first ? firstText : LEARN_PROMPT() + (fails ? '（上一轮没做完就出错了：' + String(learn.lastErr || '').slice(0, 40) + '。这轮每次写文件不超过 1500 字，长的分段用 append=true 接着写。）' : '');
         if (!first) {   // 每轮从干净的上下文开始：上一轮的过程全丢掉，只留它最后那段进度汇报（学了什么、存在哪、下一轮学什么）
           const n = core.getHistory().filter(isRealUser).length;
           core.setMessages(report ? [{ role: 'system', summary: true, content: '上一轮学习的进度汇报：\n' + report.slice(0, 1500), archive: [] }] : []);
@@ -384,6 +385,8 @@ async function runLearnLoop(firstText) {
             fails = 0;
           }
           waitMs = Math.min(300000, 30000 * Math.max(1, fails));   // 等一会再试，给 Ollama 恢复的时间，别一出错就连环重试
+          // 出错重来时界面那行要说清楚，别让人以为卡住了（10-07 用户：学到写英文话术那轮就"停住了"）
+          wkLabel = `第 ${learn.round} 轮没做完（${String(learn.lastErr || '出错').slice(0, 30)}），${Math.round(waitMs / 1000)} 秒后重来`; bc('wk', { label: wkLabel });
         }
         persist();
         await pause(waitMs);
