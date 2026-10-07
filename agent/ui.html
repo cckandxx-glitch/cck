@@ -1143,10 +1143,8 @@ function gaugeInkMid(sp) {   // 汉字笔画中心距这一行顶部多少（按
   const cs = getComputedStyle(sp), H = sp.getBoundingClientRect().height, key = cs.font + '|' + cs.lineHeight + '|' + H;   // 用精确高度：offsetHeight 会把 25.5 四舍五入成 26，175% 缩放下就差出 1 个像素
   if (gaugeInk && gaugeInk.key === key) return gaugeInk.v;
   const cx = (gaugeInk && gaugeInk.cx) || document.createElement('canvas').getContext('2d'); cx.font = cs.font;
-  const m = cx.measureText('学'), fa = m.fontBoundingBoxAscent, fd = m.fontBoundingBoxDescent;   // 行内基线：按实际字号量（浏览器排版时也是取整后的这两个值）
-  cx.font = `${cs.fontStyle} ${cs.fontWeight} ${parseFloat(cs.fontSize) * 10}px ${cs.fontFamily}`;   // 笔画上下边：实际字号下只给整数，放大 10 倍量再缩回来，精确到 0.1 像素（不然 250% 缩放下差 1 个像素）
-  const g = cx.measureText('学'), up = (g.actualBoundingBoxAscent - g.actualBoundingBoxDescent) / 20;
-  const v = fa == null ? H / 2 : (H - fa - fd) / 2 + fa - up;   // 基线位置 − 笔画中心离基线的高度
+  const m = cx.measureText('学'), fa = m.fontBoundingBoxAscent, fd = m.fontBoundingBoxDescent;
+  const v = fa == null ? H / 2 : (H - fa - fd) / 2 + fa - (m.actualBoundingBoxAscent - m.actualBoundingBoxDescent) / 2;   // 基线位置 − 笔画中心离基线的高度
   gaugeInk = { key, v, cx }; return v;
 }
 function gaugeSnap() {
