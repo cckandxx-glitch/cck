@@ -198,6 +198,7 @@ textarea{width:100%;padding:10px 12px;border:1px solid var(--line2);border-radiu
 @keyframes wkshine{from{background-position:100% 0}to{background-position:-100% 0}}
 @media (prefers-reduced-motion:reduce){#wk>span{animation:none}}
 #wk b{font-weight:400;font-variant-numeric:tabular-nums}
+#wk>span::selection{-webkit-text-fill-color:var(--ink)}   /* 文字本身是透明渐变，选中时显示成正常字色 */
 #wk>span{flex:none;width:17em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}   /* 文字长短不一：这一段定宽，后面的秒数和硬件数据就不会跟着前后伸缩 */
 #wk>b{flex:none;min-width:4.6em}   /* 「已 9 秒」到「已 999 秒」宽度不变 */
 #wk em{font-style:normal;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;opacity:.75}
@@ -495,6 +496,7 @@ body.dragging #dropv{display:flex}
 .notice .retry:disabled{opacity:.5;cursor:default}
 #tip{position:fixed;left:0;top:0;z-index:1000;pointer-events:none;opacity:0;transition:opacity .12s;background:#111;color:#f2f2f3;border:1px solid var(--line2);border-radius:8px;padding:5px 9px;font-size:12.5px;line-height:1.4;max-width:280px}
 #tip.on{opacity:1}
+#tip.one{white-space:nowrap;max-width:none}   /* 进度那行（显卡/内存/当前步骤）的提示只占一行 */
 /* 刷新不闪：数据和字体到齐前整页不画，浏览器会一直留着刷新前那一帧，到齐后一次换上 */
 html.loading body{visibility:hidden}
 </style>
@@ -892,7 +894,7 @@ document.addEventListener('click', (e) => {
   api('/api/openfile', { path: a.dataset.path }).catch((x) => uiAlert('打不开：' + x.message));
 }, true);
 function stepAdd(it) {
-  const w0 = document.getElementById('wk'); if (w0) setTimeout(() => { if (w0.isConnected) chat.appendChild(w0); }, 0);   // 动画和文字不许被打断：新步骤加进来后把它挪回最下面
+  const w0 = document.getElementById('wk'); if (w0) setTimeout(() => { if (w0.isConnected && !wkSel()) chat.appendChild(w0); }, 0);   // 动画和文字不许被打断：新步骤加进来后把它挪回最下面
   const stick = atBottom(); let st = chat.lastElementChild;
   while (st && (st.classList.contains('notice') || st.id === 'gpu' || st.id === 'wk') && st.previousElementSibling) st = st.previousElementSibling;   // 中间插进来的提示/显卡行不拆开同一组步骤
   if (!st || !st.classList.contains('steps')) { st = h('div', 'steps', '<div class="sh"><span class="ico"></span><span class="sl"></span><span class="cnt">0</span><span class="chev">›</span></div><div class="sd"></div>'); st.querySelector('.sh').onclick = () => st.classList.toggle('open'); chat.appendChild(st); }
@@ -1102,15 +1104,30 @@ async function send() {
 }
 // 显卡/内存实时状态（极简）：跟在对话最下面那行「已 xx 秒」后面；AI 空闲时这一行只显示它
 let gpuD = null;
-function hwHTML() {
-  if (!gpuD) return '';
-  const f1 = (v) => Number(v).toFixed(1), f0 = (v) => Math.round(Number(v)), p = [];
-  const hot = (v, t) => v > 85 ? `<span class="hot">${t}</span>` : t;   // 任何一项超过 85% 就变红，平时整行都是灰的
-  if (gpuD.total) p.push(`<span title="${esc(gpuD.name || '显卡')}：${gpuD.util >= 20 ? '运算中' : '空闲中'}，显存 ${f1(gpuD.used)} / ${gpuD.total} GB">显卡${hot(gpuD.util, String(gpuD.util).padStart(3, '\u2007') + '%')} ${hot(gpuD.used / gpuD.total * 100, String(f0(gpuD.used)).padStart(2, '\u2007') + '/' + f0(gpuD.total) + 'G')}</span>`);
-  if (gpuD.memTotal) { const mp = Math.round(gpuD.memUsed / gpuD.memTotal * 100); p.push(`<span title="内存 ${f1(gpuD.memUsed)} / ${f1(gpuD.memTotal)} GB${gpuD.virtTotal ? `，虚拟内存 ${f1(gpuD.virtUsed)} / ${f1(gpuD.virtTotal)} GB` : ''}">内存${hot(mp, String(mp).padStart(2, '\u2007') + '%')}</span>`); }   // 虚拟内存只放在鼠标提示里
-  return p.join(' ');
+// 这一行只改有变化的字、不重建元素：重建会把你选中的字冲掉，鼠标提示也会变成系统自带的白框
+const wkTxt = (e, t) => { if (e.textContent !== t) e.textContent = t; };
+const wkTip = (e, t) => { if (e.dataset.tip != null) e.dataset.tip = t; else if (e.getAttribute('title') !== t) e.setAttribute('title', t); };   // 鼠标正停在上面时提示存在 data-tip 里
+let wkDown = false;
+document.addEventListener('mousedown', (e) => { wkDown = !!(e.target.closest && e.target.closest('#wk')); }, true);
+document.addEventListener('mouseup', () => { wkDown = false; }, true);
+function wkSel() { const w = document.getElementById('wk'), s = getSelection(); return !!w && (wkDown || (s.rangeCount > 0 && !s.isCollapsed && (w.contains(s.anchorNode) || w.contains(s.focusNode)))); }   // 正在选这一行的字：先别刷新
+function gpuPaint() {
+  const em = document.querySelector('#wk em'); if (!em || wkSel()) return;
+  if (!em.firstChild) em.innerHTML = '<span data-k="g">显卡<span data-k="gu"></span> <span data-k="gm"></span></span> <span data-k="m">内存<span data-k="mp"></span></span>';
+  const q = (k) => em.querySelector('[data-k="' + k + '"]'), d = gpuD || {}, f1 = (v) => Number(v).toFixed(1), f0 = (v) => Math.round(Number(v));
+  const put = (k, t, pct) => { const e = q(k); wkTxt(e, t); e.classList.toggle('hot', pct > 85); };   // 任何一项超过 85% 就变红，平时整行都是灰的
+  q('g').style.display = d.total ? '' : 'none'; q('m').style.display = d.memTotal ? '' : 'none';
+  if (d.total) {
+    put('gu', String(d.util).padStart(3, '\u2007') + '%', d.util);
+    put('gm', String(f0(d.used)).padStart(2, '\u2007') + '/' + f0(d.total) + 'G', d.used / d.total * 100);
+    wkTip(q('g'), `${d.name || '显卡'}：${d.util >= 20 ? '运算中' : '空闲中'}，显存 ${f1(d.used)} / ${d.total} GB`);
+  }
+  if (d.memTotal) {
+    const mp = Math.round(d.memUsed / d.memTotal * 100);
+    put('mp', String(mp).padStart(2, '\u2007') + '%', mp);
+    wkTip(q('m'), `内存 ${f1(d.memUsed)} / ${f1(d.memTotal)} GB` + (d.virtTotal ? `，虚拟内存 ${f1(d.virtUsed)} / ${f1(d.virtTotal)} GB` : ''));   // 虚拟内存只放在鼠标提示里
+  }
 }
-function gpuPaint() { const em = document.querySelector('#wk em'); if (!em) return; const v = hwHTML(); if (em._hw !== v) em.innerHTML = em._hw = v; }
 // 思考动画：8 个红色小球，像毒液的共生体那样彼此融合。
 // 每一轮：摆成一个形状 → 8 颗两两粘成 4 团 → 再粘成 2 团 → 粘成 1 团（在团里蠕动）→ 倒着一层层分裂 → 长成另一个形状（每次随机换，不和上一个重复）
 // 形状有三个：立方体、晶格（立方晶体，原子在原位热振动）、三叶结（数学里最简单的纽结，球沿着它追）。整体绕竖轴转、固定斜着看
@@ -1168,11 +1185,13 @@ setInterval(() => {
   if (run && S.busy === '学习循环' && wk.kind === S.busy && S.busySince > wk.t0) wk.t0 = S.busySince;   // 学习每开一轮，计时从 0 重新算
   if (run && (!wk.t0 || wk.kind !== S.busy)) { wk.t0 = wk.last = Date.now(); if (S.busySince && S.busySince <= wk.t0) wk.t0 = S.busySince; wk.label = ''; wk.kind = S.busy; if (S.busySince && Date.now() - S.busySince > 2000) wk.last = Date.now() - 2000; }   // 刷新页面时 AI 早就在忙：别再藏 1.5 秒   // 任何要长时间运算的活（对话、任务队列、线索挖掘、上线下线）都显示
   if (!el) el = h('div', '', '<i></i><span></span><b></b><em></em>'), el.id = 'wk', wkBalls(el.firstChild);
+  if (wkSel()) return;   // 正在选这一行的字：不刷新、不挪位置，松手复制完再接着走
   el.classList.toggle('idle', !run);
   const stick = atBottom();
   if (run) {
-    el.children[1].textContent = el.children[1].title = chat.querySelector('.confirm [data-ok]') ? '正在等你点「同意」或「拒绝」' : wk.label || S.wkLabel || (S.busy === '对话' ? '正在等模型回答' : '正在' + S.busy);
-    el.children[2].textContent = '已 ' + Math.round((Date.now() - wk.t0) / 1000) + ' 秒';
+    const lb = chat.querySelector('.confirm [data-ok]') ? '正在等你点「同意」或「拒绝」' : wk.label || S.wkLabel || (S.busy === '对话' ? '正在等模型回答' : '正在' + S.busy);
+    wkTxt(el.children[1], lb); wkTip(el.children[1], lb);
+    wkTxt(el.children[2], '已 ' + Math.round((Date.now() - wk.t0) / 1000) + ' 秒');
   }
   gpuPaint();
   if (chat.lastElementChild !== el) { chat.appendChild(el); if (stick) chat.scrollTop = chat.scrollHeight; }
@@ -1572,8 +1591,8 @@ async function retryLast() {
 // 悬停提示：停 0.25 秒后出现深色小提示，代替系统自带的慢提示
 { const tip = document.createElement('div'); tip.id = 'tip'; document.body.appendChild(tip); let tm = 0, cur = null;
   const hide = () => { clearTimeout(tm); tip.classList.remove('on'); if (cur) { if (cur.dataset.tip != null) cur.setAttribute('title', cur.dataset.tip); delete cur.dataset.tip; cur = null; } };
-  const show = (el) => { const t = el.dataset.tip; if (!t) return; tip.textContent = t; tip.classList.add('on'); const r = el.getBoundingClientRect(), w = tip.getBoundingClientRect(); let y = r.bottom + 8; if (y + w.height > innerHeight - 4) y = r.top - w.height - 8; tip.style.left = Math.max(6, Math.min(r.left + r.width / 2 - w.width / 2, innerWidth - w.width - 6)) + 'px'; tip.style.top = Math.max(6, y) + 'px'; };
-  document.addEventListener('mouseover', (e) => { const el = e.target.closest && e.target.closest('[title]'); if (el && el === cur) return; hide(); if (!el || !el.getAttribute('title')) return; el.dataset.tip = el.getAttribute('title'); el.removeAttribute('title'); cur = el; tm = setTimeout(() => show(el), 250); });
+  const show = (el) => { const t = el.dataset.tip; if (!t) return; tip.textContent = t; tip.classList.toggle('one', !!el.closest('#wk')); tip.classList.add('on'); const r = el.getBoundingClientRect(), w = tip.getBoundingClientRect(); let y = r.bottom + 8; if (y + w.height > innerHeight - 4) y = r.top - w.height - 8; tip.style.left = Math.max(6, Math.min(r.left + r.width / 2 - w.width / 2, innerWidth - w.width - 6)) + 'px'; tip.style.top = Math.max(6, y) + 'px'; };
+  document.addEventListener('mouseover', (e) => { const el = e.target.closest && e.target.closest('[title],[data-tip]'); if (el && el === cur) return; hide(); if (!el || !el.getAttribute('title')) return; el.dataset.tip = el.getAttribute('title'); el.removeAttribute('title'); cur = el; tm = setTimeout(() => show(el), 250); });
   document.addEventListener('mouseout', (e) => { if (!e.relatedTarget) hide(); });
   document.addEventListener('mousedown', hide, true); document.addEventListener('scroll', hide, true); document.addEventListener('keydown', hide, true); addEventListener('blur', hide); }
 // 对话改名：双击左栏标题，或右键「重命名」；Enter 保存，Esc 取消
