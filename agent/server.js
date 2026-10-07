@@ -356,7 +356,7 @@ async function runLearnLoop(firstText) {
             let ok = false;
             try { ok = (await core.compactNow()) > 0; } catch (e) {}
             if (!ok) core.setMessages([]);
-            notice('学习连续出错：' + learn.lastErr);   // 只在连续 3 次出错时说一句，单次出错自动重试不提示
+            notice('学习连续 3 次出错（' + learn.lastErr + '），已' + (ok ? '压缩' : '清空') + '上下文，继续学。');   // 只在连续 3 次出错时说一句，单次出错自动重试不提示
             fails = 0;
           }
           waitMs = Math.min(300000, 30000 * Math.max(1, fails));   // 等一会再试，给 Ollama 恢复的时间，别一出错就连环重试

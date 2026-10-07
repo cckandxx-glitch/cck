@@ -561,11 +561,11 @@ ${memory() ? `记住的关于用户的事：\n${memory()}\n` : ''}规则：
 
   async function chatOnce(extraOpts, noTools) {
     abortCtl = new AbortController();
-    let stalled = false, stallT; const arm = (ms) => { clearTimeout(stallT); stallT = setTimeout(() => { stalled = true; abortCtl.abort(); }, ms); };   // 等第一个字最多 5 分钟（冷启动加载大模型要久），出字以后 2 分钟没动静就当它挂了
+    let stalled = '', stallT; const arm = (ms) => { clearTimeout(stallT); stallT = setTimeout(() => { stalled = ms >= 300000 ? 'start' : 'mid'; abortCtl.abort(); }, ms); };   // 等第一个字最多 5 分钟（冷启动加载大模型要久），出字以后 2 分钟没动静就当它挂了
     // 学习模式：单次回答最多 5 分钟，到点就中断，这一步算失败、自动重试（10-07：一次回答卡了 600 多秒，显卡 100% GPU，是模型在一直往下写停不下来）
-    const capT = lean ? setTimeout(() => { stalled = true; abortCtl.abort(); }, 300000) : null;
+    const capT = lean ? setTimeout(() => { stalled = 'cap'; abortCtl.abort(); }, 300000) : null;
     try { arm(300000); return await chatOnceRun(extraOpts, arm, noTools); }
-    catch (e) { if (stalled && e.name === 'AbortError') throw new Error('模型太久没有响应，已中断。点这行后面的「重试」再试一次。'); throw e; }
+    catch (e) { if (stalled && e.name === 'AbortError') throw new Error({ cap: '单步超过 5 分钟没写完', start: '模型 5 分钟没开始回答，已中断，可点「重试」', mid: '模型 2 分钟没有新内容，已中断，可点「重试」' }[stalled]); throw e; }
     finally { clearTimeout(stallT); clearTimeout(capT); }
   }
   async function chatOnceRun(extraOpts, arm, noTools) {
@@ -698,7 +698,8 @@ ${memory() ? `记住的关于用户的事：\n${memory()}\n` : ''}规则：
     } catch (e) {
       if (opts.sub && (e.name === 'AbortError' || e.name === 'StopError')) throw e;
       if (e.name === 'AbortError' || e.name === 'StopError') { emit('stopped', {}); log('stop', {}); return lastText; }
-      emit('error', { text: e.message }); throw e;
+      if (opts.loop) emit('done', {}); else emit('error', { text: e.message });   // 学习中出错不在聊天里报（循环会自己重试，连错 3 次才说一句）
+      throw e;
     }
     return lastText;
   }
