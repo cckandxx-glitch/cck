@@ -198,6 +198,8 @@ textarea{width:100%;padding:10px 12px;border:1px solid var(--line2);border-radiu
 @keyframes wkshine{from{background-position:100% 0}to{background-position:-100% 0}}
 @media (prefers-reduced-motion:reduce){#wk>span{animation:none}}
 #wk b{font-weight:400;font-variant-numeric:tabular-nums}
+#wk>span{flex:none;width:17em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}   /* 文字长短不一：这一段定宽，后面的秒数和硬件数据就不会跟着前后伸缩 */
+#wk>b{flex:none;min-width:4.6em}   /* 「已 9 秒」到「已 999 秒」宽度不变 */
 #wk em{font-style:normal;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;opacity:.75}
 #wk:not(.idle) em:not(:empty)::before{content:'·';margin-right:10px}
 #wk em .hot{color:#e5484d}
@@ -1104,8 +1106,8 @@ function hwHTML() {
   if (!gpuD) return '';
   const f1 = (v) => Number(v).toFixed(1), f0 = (v) => Math.round(Number(v)), p = [];
   const hot = (v, t) => v > 85 ? `<span class="hot">${t}</span>` : t;   // 任何一项超过 85% 就变红，平时整行都是灰的
-  if (gpuD.total) p.push(`<span title="${esc(gpuD.name || '显卡')}：${gpuD.util >= 20 ? '运算中' : '空闲中'}，显存 ${f1(gpuD.used)} / ${gpuD.total} GB">显卡${hot(gpuD.util, gpuD.util + '%')} ${hot(gpuD.used / gpuD.total * 100, f0(gpuD.used) + '/' + f0(gpuD.total) + 'G')}</span>`);
-  if (gpuD.memTotal) { const mp = Math.round(gpuD.memUsed / gpuD.memTotal * 100); p.push(`<span title="内存 ${f1(gpuD.memUsed)} / ${f1(gpuD.memTotal)} GB${gpuD.virtTotal ? `，虚拟内存 ${f1(gpuD.virtUsed)} / ${f1(gpuD.virtTotal)} GB` : ''}">内存${hot(mp, mp + '%')}</span>`); }   // 虚拟内存只放在鼠标提示里
+  if (gpuD.total) p.push(`<span title="${esc(gpuD.name || '显卡')}：${gpuD.util >= 20 ? '运算中' : '空闲中'}，显存 ${f1(gpuD.used)} / ${gpuD.total} GB">显卡${hot(gpuD.util, String(gpuD.util).padStart(3, '\u2007') + '%')} ${hot(gpuD.used / gpuD.total * 100, String(f0(gpuD.used)).padStart(2, '\u2007') + '/' + f0(gpuD.total) + 'G')}</span>`);
+  if (gpuD.memTotal) { const mp = Math.round(gpuD.memUsed / gpuD.memTotal * 100); p.push(`<span title="内存 ${f1(gpuD.memUsed)} / ${f1(gpuD.memTotal)} GB${gpuD.virtTotal ? `，虚拟内存 ${f1(gpuD.virtUsed)} / ${f1(gpuD.virtTotal)} GB` : ''}">内存${hot(mp, String(mp).padStart(2, '\u2007') + '%')}</span>`); }   // 虚拟内存只放在鼠标提示里
   return p.join(' ');
 }
 function gpuPaint() { const em = document.querySelector('#wk em'); if (!em) return; const v = hwHTML(); if (em._hw !== v) em.innerHTML = em._hw = v; }
@@ -1169,7 +1171,7 @@ setInterval(() => {
   el.classList.toggle('idle', !run);
   const stick = atBottom();
   if (run) {
-    el.children[1].textContent = chat.querySelector('.confirm [data-ok]') ? '正在等你点「同意」或「拒绝」' : wk.label || S.wkLabel || (S.busy === '对话' ? '正在等模型回答' : '正在' + S.busy);
+    el.children[1].textContent = el.children[1].title = chat.querySelector('.confirm [data-ok]') ? '正在等你点「同意」或「拒绝」' : wk.label || S.wkLabel || (S.busy === '对话' ? '正在等模型回答' : '正在' + S.busy);
     el.children[2].textContent = '已 ' + Math.round((Date.now() - wk.t0) / 1000) + ' 秒';
   }
   gpuPaint();
