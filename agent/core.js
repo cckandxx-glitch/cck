@@ -632,8 +632,11 @@ ${learnTodo()}
       finally { clearTimeout(stallT); clearTimeout(capT); }
     }
   }
+  // 采样参数按 Qwen 官方推荐（10-07 查「为什么一想就停不下来」）：Modelfile 里只设了 temperature 0.6，其余用的是 Ollama 默认值（top_k 40、无重复惩罚），
+  // 量化过的 Qwen 在这种设置下容易在思考里绕圈子。官方：思考 0.6/0.95/20，不思考 0.7/0.8/20，量化模型加 presence_penalty 1.5 防复读。config 里可改。
+  const sampling = (think) => ({ temperature: think ? 0.6 : 0.7, top_p: think ? 0.95 : 0.8, top_k: 20, min_p: 0, presence_penalty: cfg.presencePenalty ?? 1.5, ...(cfg.sampling || {}) });
   async function chatOnceRun(extraOpts, arm, noTools, noThink, bail) {
-    const body = { model: cfg.model, messages: sendMsgs(), ...(noTools ? {} : { tools: allTools() }), stream: true, think: noThink ? false : lean ? !!cfg.learnThink : cfg.think, keep_alive: -1, options: { num_ctx: ctxN(), ...(lean ? { num_predict: cfg.learnPredict || 4096 } : {}), ...(extraOpts || {}) } };   // 学习时一次最多写 4096 个词元，防止模型复读停不下来
+    const body = { model: cfg.model, messages: sendMsgs(), ...(noTools ? {} : { tools: allTools() }), stream: true, think: noThink ? false : lean ? !!cfg.learnThink : cfg.think, keep_alive: -1, options: { num_ctx: ctxN(), ...sampling(noThink ? false : lean ? !!cfg.learnThink : cfg.think), ...(lean ? { num_predict: cfg.learnPredict || 4096 } : {}), ...(extraOpts || {}) } };   // 学习时一次最多写 4096 个词元，防止模型复读停不下来
     let r;
     for (let tryN = 0; ; tryN++) {   // Ollama 推理进程偶尔崩一下（500 / 连不上），自己会重启：等几秒重试一次，别让用户重发
       try { r = await fetch(cfg.ollama + '/api/chat', { method: 'POST', signal: abortCtl.signal, body: JSON.stringify(body) }); }
@@ -659,8 +662,8 @@ ${learnTodo()}
           thinkN += m.thinking.length; if (!thinking) { thinking = true; emit('thinking', {}); }
           thinkTxt = (thinkTxt + m.thinking).slice(-30000);
           // 每多想 1000 字查一次：最后 200 字在前面一字不差出现过 = 在原地打转
-          if (thinkN - checkedAt >= 1000) { checkedAt = thinkN; const tail = thinkTxt.slice(-200); if (tail.trim().length >= 100 && thinkTxt.indexOf(tail) < thinkTxt.length - 200) { bail('thinkloop'); throw Object.assign(new Error('思考打转'), { name: 'AbortError' }); } }
-          if (thinkN > THINK_MAX && !content) { bail('thinklong'); throw Object.assign(new Error('思考太长'), { name: 'AbortError' }); }
+          if (thinkN - checkedAt >= 1000) { checkedAt = thinkN; const tail = thinkTxt.slice(-200); if (tail.trim().length >= 100 && thinkTxt.indexOf(tail) < thinkTxt.length - 200) { log('think_dump', { why: '原地打转', chars: thinkN, text: thinkTxt.slice(-4000) }); bail('thinkloop'); throw Object.assign(new Error('思考打转'), { name: 'AbortError' }); } }
+          if (thinkN > THINK_MAX && !content) { log('think_dump', { why: '想太长', chars: thinkN, head: thinkTxt.slice(0, 1500), text: thinkTxt.slice(-3000) }); bail('thinklong'); throw Object.assign(new Error('思考太长'), { name: 'AbortError' }); }
         }
         if (m.content) { thinking = false; if (!quietTok) emit('token', { text: m.content }); content += m.content; if (quietTok && Date.now() - quietAt > 1500) { quietAt = Date.now(); emit('quiet', { n: content.length }); } }   // 学习时字不上屏，但要让界面知道模型还在写、写了多少，不然看着像卡住
         if (m.tool_calls) calls.push(...m.tool_calls);
