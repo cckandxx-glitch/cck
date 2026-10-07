@@ -140,8 +140,24 @@ function createCore(cfg, hooks = {}) {
       return is ? unent(is[1].replace(/<[^>]+>/g, '')) : (v ? unent(v[1]) : '');
     }).join(' | ')).join('\n')).join('\n');
   }
-  // 文本文件自动判断编码（UTF-8 不行就按 GBK）
-  const readTextAuto = (f) => { const b = fs.readFileSync(f); try { return new TextDecoder('utf-8', { fatal: true }).decode(b); } catch (e) { try { return new TextDecoder('gbk').decode(b); } catch (e2) { return b.toString('latin1'); } } };
+  // 文本编码判断：有 BOM 看 BOM；没 BOM 但隔一个字节就是 0 的按 UTF-16（PowerShell 5 的 > 和 Out-File 默认写 UTF-16）；再试 UTF-8，不行按 GBK
+  const textEnc = (b) => {
+    if (b[0] === 0xff && b[1] === 0xfe) return 'utf-16le';
+    if (b[0] === 0xfe && b[1] === 0xff) return 'utf-16be';
+    if (b[0] === 0xef && b[1] === 0xbb && b[2] === 0xbf) return 'utf-8';
+    const n = Math.min(b.length, 4000) & ~1; let ev = 0, od = 0;
+    for (let i = 0; i < n; i += 2) { if (b[i] === 0) ev++; if (b[i + 1] === 0) od++; }
+    if (n >= 4 && od > n / 6 && ev < n / 50) return 'utf-16le';
+    if (n >= 4 && ev > n / 6 && od < n / 50) return 'utf-16be';
+    try { new TextDecoder('utf-8', { fatal: true }).decode(b); return 'utf-8'; } catch (e) { return 'gbk'; }
+  };
+  const decodeText = (b, enc) => { try { return new TextDecoder(enc).decode(b); } catch (e) { return b.toString('latin1'); } };
+  const encodeText = (t, enc) => {
+    if (enc === 'utf-16le') return Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(t, 'utf16le')]);
+    if (enc === 'utf-16be') return Buffer.concat([Buffer.from([0xfe, 0xff]), Buffer.from(t, 'utf16le').swap16()]);
+    return Buffer.from(t, 'utf8');
+  };
+  const readTextAuto = (f) => { const b = fs.readFileSync(f); return decodeText(b, textEnc(b)); };
   // 任何文件 → 文字（pdf / docx / xlsx / pptx / html / 普通文本）
   function fileText(f) {
     const ext = path.extname(f).slice(1).toLowerCase();
@@ -308,12 +324,13 @@ function createCore(cfg, hooks = {}) {
     async edit_file({ path: p, old: a, new: b }) {
       const f = abs(p); if (BLOCKED.test(f)) throw new Error('不能改系统目录: ' + f);
       if (!fs.existsSync(f)) throw new Error('不存在: ' + f);
-      let t; try { t = new TextDecoder('utf-8', { fatal: true }).decode(fs.readFileSync(f)); } catch (e) { throw new Error('这个文件不是 UTF-8 文本，不能用 edit_file'); }
+      const raw = fs.readFileSync(f), enc = textEnc(raw); if (enc === 'gbk') throw new Error('这个文件不是 UTF-8/UTF-16 文本，不能用 edit_file');
+      const t = decodeText(raw, enc);
       a = String(a); const i = t.indexOf(a);
       if (!a || i < 0) throw new Error('文件里找不到 old 这段文字（要和原文一字不差）');
       if (t.indexOf(a, i + 1) >= 0) throw new Error('old 在文件里出现了不止一次，请多带几行上下文让它唯一');
       if (!(await ask(`修改文件 ${shown(f)}`, { kind: 'write', path: f, preview: cut('- ' + a + '\n+ ' + b, 600) }))) return '用户拒绝了这次修改。';
-      fs.writeFileSync(f, t.slice(0, i) + String(b) + t.slice(i + a.length), 'utf8');
+      fs.writeFileSync(f, encodeText(t.slice(0, i) + String(b) + t.slice(i + a.length), enc));   // 保持原编码（.vbs 之类要 UTF-16 才认中文）
       return '已修改 ' + shown(f);
     },
     async open_path({ target }) {
@@ -336,7 +353,7 @@ function createCore(cfg, hooks = {}) {
       const dir = cwd ? abs(cwd) : WS; const secs = Math.min(900, Math.max(5, +timeout || 120));
       if (!fs.existsSync(dir)) throw new Error('目录不存在: ' + dir);
       if (!(await ask('运行命令: ' + command + (dir !== WS ? `\n（在 ${dir} 里运行）` : '') + (background ? '\n（后台运行，不等结果）' : ''), { kind: 'command', command, cwd: dir }))) return '用户拒绝运行这条命令。';
-      const args = ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', '[Console]::OutputEncoding=[Text.Encoding]::UTF8; ' + command];
+      const args = ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', "[Console]::OutputEncoding=[Text.Encoding]::UTF8; $PSDefaultParameterValues['Out-File:Encoding']='utf8'; $PSDefaultParameterValues['Set-Content:Encoding']='utf8'; $PSDefaultParameterValues['Add-Content:Encoding']='utf8'; " + command];
       if (background) {
         const ps = spawn('powershell.exe', args, { cwd: dir, detached: true, stdio: 'ignore', windowsHide: false }); ps.unref();
         return `已在后台启动（进程号 ${ps.pid}）。不等结果；想知道有没有跑起来，用 run_command 查。`;
