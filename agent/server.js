@@ -67,7 +67,8 @@ function persist() {
   if (!cur || !dirty || !hasUser()) return;
   const messages = core.getHistory().map((m) => { const c = { ...m }; delete c.images; return c; });
   const rec = { id: cur.id, title: cur.title, created: cur.created, updated: Date.now(), droppedUsers, tr, messages };
-  const f = cfile(cur.id); fs.writeFileSync(f + '.tmp', JSON.stringify(rec)); fs.renameSync(f + '.tmp', f);
+  const f = cfile(cur.id);
+  try { fs.writeFileSync(f + '.tmp', JSON.stringify(rec)); fs.renameSync(f + '.tmp', f); } catch (e) { bbS('保存对话失败（下次再存）', e.message); return; }   // Windows 上杀毒/索引偶尔锁住文件，存不上就下次再存，不能让学习循环因此出错或后台崩掉
   try { const lf = path.join(CONVLOGDIR, cur.id + '.json'); fs.writeFileSync(lf + '.tmp', JSON.stringify(rec)); fs.renameSync(lf + '.tmp', lf); } catch (e) {}
   convs.set(cur.id, { id: cur.id, title: cur.title, updated: rec.updated }); dirty = false;
 }
@@ -268,7 +269,7 @@ ${text}` : text;
     if (isStopLearnCmd(text)) { if (learn.on) { stopLearn('你说"停止学习"'); } else notice('现在没有在学。说"请学习"我就开始学习循环。'); return; }
     if (isLearnCmd(text)) {
       if (learn.on) { notice('学习循环已经在跑了（第 ' + learn.round + ' 轮），不用重复说。'); return; }
-      runLearnLoop(mtext); return;
+      runLearnLoop(mtext).catch((e) => { bbS('学习循环异常退出', e); notice('学习循环异常退出：' + e.message); }); return;   // 不接住的话一个意外错误就会让整个后台崩掉（unhandledRejection → exit）
     }
     if ((await pw.status()).state === 'off') {
       const g = auto.blocking(); if (g) { offerForce(g, mtext); return; }
@@ -294,7 +295,7 @@ async function runLearnLoop(firstText) {
       if (learn.round > 1) notice('—— 学习循环第 ' + learn.round + ' 轮开始 ——');
       const before = core.getHistory();
       let failed = false;
-      try { await core.turn(prompt); fails = 0; } catch (e) { if (e.name !== 'StopError') { failed = true; fails++; notice('学习循环出错：' + e.message); } }
+      try { await core.turn(prompt, { loop: true }); fails = 0; } catch (e) { if (e.name !== 'StopError') { failed = true; fails++; notice('学习循环出错：' + e.message); } }
       if (!learn.on) break;
       if (learn.stopped) break;
       let waitMs = 2000;   // 本轮结束，等 2 秒喘口气再开下一轮（期间说"停止学习"或急停都能打断）

@@ -465,27 +465,43 @@ ${memory() ? `你记住的关于用户的事（来自 ${MEMF}）：\n${memory()}
       return String((await r.json()).message.content || '').replace(/<think>[\s\S]*?<\/think>/g, '').trim();
     } finally { clearTimeout(tm); }
   }
+  // 旧的工具调用参数（比如 write_file 的整篇内容）也很占地方：文件已经写到磁盘上了，记忆里只留开头
+  const shrinkCall = (c) => {
+    const args = c.function && c.function.arguments;
+    if (!args || typeof args !== 'object' || !Object.values(args).some((v) => typeof v === 'string' && v.length > 400)) return c;
+    const a2 = {}; for (const [k, v] of Object.entries(args)) a2[k] = typeof v === 'string' && v.length > 400 ? v.slice(0, 200) + '…（已省略，共 ' + v.length + ' 字）' : v;
+    return { ...c, function: { ...c.function, arguments: a2 } };
+  };
   // force：用户点了左上角的圈手动压缩——不看用量，除最近一轮外全部压成摘要；返回压掉的轮数（0 = 没东西可压）
   async function compact(force) {
     if (!force && lastUsed < cfg.numCtx * 0.7) return 0;
     let n = 0;
     const keepFrom = Math.max(1, messages.length - 8);
-    for (let i = 1; i < keepFrom; i++) { const m = messages[i]; if (m.role === 'tool' && m.content.length > 200) { m.full = m.full || m.content; m.content = m.content.slice(0, 150) + '…（旧结果已压缩）'; } if (m.images) delete m.images; }
+    for (let i = 1; i < keepFrom; i++) { const m = messages[i]; if (m.role === 'tool' && m.content.length > 200) { m.full = m.full || m.content; m.content = m.content.slice(0, 150) + '…（旧结果已压缩）'; } if (m.images) delete m.images; if (m.tool_calls) m.tool_calls = m.tool_calls.map(shrinkCall); }
     if (force || lastUsed >= cfg.numCtx * 0.85) {
       const start = isSummary(messages[1] || {}) ? 2 : 1;
       const users = []; for (let i = start; i < messages.length; i++) if (realUser(messages[i])) users.push(i);
-      if (users.length >= 2) {
-        const cut = force ? users[users.length - 1] : users[Math.max(1, Math.floor(users.length / 2))];   // 自动：至少留最近一半的轮次；手动：只留最近一轮。当前这一轮永远不动
-        const gone = messages.slice(start, cut), prev = start === 2 ? messages[1].content : '';
+      // 要压的范围 [a, b)：够两轮时按轮压，当前这一轮永远不动
+      let a = 0, b = 0, inRound = false;
+      if (users.length >= 2) { a = start; b = force ? users[users.length - 1] : users[Math.max(1, Math.floor(users.length / 2))]; }   // 自动：至少留最近一半的轮次；手动：只留最近一轮
+      else if (!force && users.length === 1) {
+        // 只剩当前这一轮还是快满了（学习循环一轮能跑上百步）：把这一轮里较早的步骤也压进摘要，本轮的要求和最近几步留着。
+        // 不压的话 Ollama 会从前面悄悄截掉，连本轮的要求都丢了，模型就在一轮里原地打转。
+        let e = messages.length - 8; while (e > users[0] + 1 && messages[e].role !== 'assistant') e--;   // 从一条 AI 消息开始留，别把工具结果和它的调用拆开
+        if (e - users[0] - 1 >= 4) { a = users[0] + 1; b = e; inRound = true; }
+      }
+      if (b > a) {
+        const gone = messages.slice(a, b), old = start === 2 ? messages[1] : null, prev = old ? old.content : '';
         n = gone.filter(realUser).length;
-        emit('notice', { text: force ? '正在手动压缩对话，稍等…' : '对话太长，正在把较早的内容压缩成摘要，稍等…' });
+        emit('notice', { text: force ? '正在手动压缩对话，稍等…' : inRound ? '这一轮做的步骤太多，正在把本轮较早的步骤压缩成摘要，稍等…' : '对话太长，正在把较早的内容压缩成摘要，稍等…' });
         let sum = '';
         try { sum = await summarize(gone, prev); } catch (e) { if (e.name === 'AbortError' && stopped) throw e; log('summary_fail', { error: e.message }); }
-        const old = start === 2 ? messages[1] : null;
         const archive = [...((old && old.archive) || []), ...gone.map((m) => { const c = { ...m }; delete c.images; return c; })];
-        messages.splice(1, cut - 1, { role: 'system', summary: true, content: sum || (old ? old.content : ''), archive });   // 摘要失败时旧摘要照留
+        const sm = { role: 'system', summary: true, content: sum || prev, archive };   // 摘要失败时旧摘要照留
+        messages.splice(a, b - a);
+        if (old) messages[1] = sm; else messages.splice(1, 0, sm);
         emit('dropped', { users: n });
-        emit('notice', { text: sum ? `已把较早的 ${n} 轮对话压缩成摘要，AI 还记得要点，需要原话时它会自己翻（界面上的记录还在）。` : '摘要没生成出来，较早的内容已移出 AI 的记忆，需要时它可以翻旧记录找回（界面上的记录还在）。' });
+        emit('notice', { text: !sum ? '摘要没生成出来，较早的内容已移出 AI 的记忆，需要时它可以翻旧记录找回（界面上的记录还在）。' : inRound ? `已把这一轮较早的 ${gone.length} 条步骤压缩成摘要，接着做。` : `已把较早的 ${n} 轮对话压缩成摘要，AI 还记得要点，需要原话时它会自己翻（界面上的记录还在）。` });
         if (sum) log('summary', { text: sum });
       }
     }
@@ -602,7 +618,7 @@ ${memory() ? `你记住的关于用户的事（来自 ${MEMF}）：\n${memory()}
           }
         }
       }
-      emit('notice', { text: `已达到单次任务最大步数（${cfg.maxSteps}），本轮结束${opts.sub ? '，自动进入下一轮' : '，停下来等你指示'}。` });
+      emit('notice', { text: `已达到单次任务最大步数（${cfg.maxSteps}），本轮结束${opts.sub || opts.loop ? '，自动进入下一轮' : '，停下来等你指示'}。` });
     } catch (e) {
       if (opts.sub && (e.name === 'AbortError' || e.name === 'StopError')) throw e;
       if (e.name === 'AbortError' || e.name === 'StopError') { emit('stopped', {}); log('stop', {}); return lastText; }
