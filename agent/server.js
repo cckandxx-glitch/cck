@@ -49,6 +49,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const LEARN_PROMPT = () => '（学习第 ' + learn.round + ' 轮：按自学计划学 1~2 个主题，存进知识库。最后只写一行（不超过 60 字），格式：学了 XX；存进 XX；下一轮 XX。）';
 function stopLearn(reason) {
   if (!learn.on) return;
+  bbS('停止学习：', reason, '第', learn.round, '轮');
   learn.on = false; learn.stopped = true; setResumable(true); learn.inbox = []; saveLearn(false);
   core.stop(); skipAsks();
   for (const [id, p] of pending) { pending.delete(id); p.resolve(false); bc('confirm_done', { id, answered: '已拒绝' }); }
@@ -295,8 +296,9 @@ ${text}` : text;
     // 10-07：急停学习后只说「继续」，用户的意思是接着学，不是让 AI 接着聊
     const resume = !learn.on && learn.resumable && /^(继续|接着|接着来|继续吧|接着学|继续学)[。!！]?$/.test(String(text).trim());
     if (!learn.on && !isLearnCmd(text) && !resume) setResumable(false);   // 学习中插话不算放弃学习
+    // 学习在等游戏关掉时说「继续」：不当成聊天，告诉用户在等什么
+    if (learn.on && (isLearnCmd(text) || /^(继续|接着|接着来|继续吧|接着学|继续学)[。!！]?$/.test(String(text).trim()))) { notice(learn.paused ? `学习在等「${learn.paused}」关掉（它在占用显卡），关掉后自动接着学。` : '已在学习中。'); return; }
     if (isLearnCmd(text) || resume) {
-      if (learn.on) { notice('已在学习中。'); return; }
       runLearnLoop(resume ? '继续学习' : mtext).catch((e) => { bbS('学习循环异常退出', e); notice('学习出错退出：' + e.message); }); return;   // 不接住的话一个意外错误就会让整个后台崩掉（unhandledRejection → exit）
     }
     const st0 = await pw.status();
@@ -318,7 +320,9 @@ async function runLearnLoop(firstText) {
   // 学习要占用 busy；用户插话、游戏让路时会临时让出，拿回来前等别的事做完
   const claim = async () => { while (learn.on && busy && busy !== '学习循环') await sleep(500); if (learn.on) { busy = '学习循环'; bc('state', {}); } };
   // 学到一半检测到游戏：不等这一轮学完，马上打断让出显存
-  const gameWatch = setInterval(() => { if (learn.on && busy === '学习循环' && !learn.yielding && auto.blocking() && !auto.get().forced) { learn.yielding = '检测到游戏在运行，学习这一轮先停下，让出显存。'; core.stop(); } }, 3000);
+  // 只认确定了的游戏（持续 6 秒以上）：显卡占用一闪而过（开网页、看视频）不再打断这一轮（10-07 第 5 轮查完 CRM 后被打断、之后看着像停了）
+  const gameOn = () => { const a = auto.get(); return a.active && !a.forced; };
+  const gameWatch = setInterval(() => { if (learn.on && busy === '学习循环' && !learn.yielding && gameOn()) { learn.yielding = '检测到游戏在运行，学习这一轮先停下，让出显存。'; bbS('学习第', learn.round, '轮让路给游戏', auto.get().game); core.stop(); } }, 3000);
   const pause = async (ms) => { for (let i = 0; i < ms / 100 && learn.on && !learn.inbox.length && !learn.yielding; i++) await sleep(100); };
   core.setLean(true);   // 学习用小上下文 + 狠压缩，给显卡减负（换上下文大小时 Ollama 会重新载入一次模型，约 7 秒）
   try {
@@ -337,11 +341,14 @@ async function runLearnLoop(firstText) {
           continue;
         }
         // 2. 自动模式检测到游戏：先让出显存（自动下线），游戏关了自动上线后接着学；用户点了「强制上线」就不让
-        const g = auto.blocking();
-        if (g && !auto.get().forced) {
-          learn.yielding = false;
+        if (gameOn()) {
+          learn.yielding = false; learn.paused = auto.get().title || auto.get().game;
           busy = null; bc('state', {});
-          while (learn.on && auto.blocking() && !auto.get().forced) await sleep(3000);
+          // 让路要说一声，不然界面看着就是学习停了（10-07 用户：跑到第 5 轮又停了）
+          notice(`学习暂停：「${learn.paused}」在占用显卡（当成游戏了），它关掉后自动接着学。不是游戏的话，点系统通知里的「这不是游戏」。`);
+          while (learn.on && gameOn()) await sleep(3000);
+          learn.paused = '';
+          bbS('游戏没了，学习接着来');
           if (!learn.on) break;
           await claim();
           continue;
@@ -371,6 +378,7 @@ async function runLearnLoop(firstText) {
         try { const r = await core.turn(prompt, { loop: true, round: learn.round }); if (!overtime && r && r.trim()) { report = r.trim(); said = true; } fails = 0; } catch (e) { if (e.name !== 'StopError') { failed = true; fails++; learn.lastErr = e.message; } }
         finally { clearTimeout(roundT); }
         if (overtime) learn.yielding = false;
+        bbS('学习第', learn.round, '轮结束：', said ? '有汇报' : failed ? '出错 ' + learn.lastErr : overtime ? '超时' : learn.yielding ? '被打断（' + (learn.inbox.length ? '用户插话' : learn.yielding) + '）' : '没写汇报');
         if (!said && !failed && learn.on && !learn.inbox.length && (overtime || !learn.yielding)) {   // 这一轮没写出汇报：替它简短交代一句，让用户知道它在正常干活
           const q = [...learn.did.q].slice(0, 3), f = [...learn.did.f].slice(0, 3);
           notice(`第 ${learn.round} 轮 ${new Date().toTimeString().slice(0, 5)}｜` + (overtime ? '（超时收尾）' : '') + (q.length ? '查了「' + q.join('」「') + '」' : '没查到新资料') + (f.length ? '；存进 ' + f.join('、') : '；没存笔记'));
