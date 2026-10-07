@@ -202,6 +202,10 @@ textarea{width:100%;padding:10px 12px;border:1px solid var(--line2);border-radiu
 .confirm b{color:var(--warn)}
 .confirm pre{margin:8px 0;padding:10px 12px;background:var(--bg);border-radius:8px;font-family:var(--mono);font-size:var(--f1);white-space:pre-wrap;word-break:break-all;max-height:200px;overflow:auto}
 .confirm .acts{display:flex;gap:10px;margin-top:10px}
+.confirm .ci{margin-top:6px}
+.confirm pre.cq{max-height:calc(4.5em + 20px);overflow:hidden;cursor:pointer;margin:4px 0 0}
+.confirm pre.cq.open{max-height:200px;overflow:auto}
+.confirm details summary{cursor:pointer;color:var(--mute);font-size:var(--f1)}
 
 /* AI 提的选择题：跟「需要你确认」同一张卡；选项一行一个，数字键可选 */
 .askq{margin-bottom:10px;background:var(--side);border-radius:var(--r);padding:14px 16px;outline:0}
@@ -932,10 +936,23 @@ chat.addEventListener('mousemove', (e) => {
 chat.addEventListener('scroll', hideAiLine);
 chat.addEventListener('mouseleave', hideAiLine);
 function h(tag, cls, html) { const e = document.createElement(tag); e.className = cls; e.innerHTML = html; return e; }
+// 确认框（2026-10-07 精简）：每项一行短标题；命令原文只显示一次、超过 3 行折起来（点一下展开）；写文件的内容默认收起；不再重复显示路径和目录
+function confirmItem(q, d) {
+  q = String(q || ''); d = d || {};
+  const isCmd = d.kind === 'command' && /^运行命令/.test(q);
+  const head = isCmd ? '运行命令' + (q.match(/（在 .+ 里运行）|（后台运行，不等结果）/g) || []).join('') : q.split('\n')[0];
+  const body = isCmd ? `<pre class="cq" title="点一下展开/收起">${esc(d.command || '')}</pre>` : d.kind === 'write' && d.preview ? `<details><summary>看内容</summary><pre>${esc(d.preview)}</pre></details>` : '';
+  return `<div class="ci"><span${d.path ? ' title="' + esc(d.path) + '"' : ''}>${esc(head)}</span>${body}</div>`;
+}
 function confirmEl(it) {
   const d = it.detail || {};
-  const body = d.kind === 'command' ? `在：${esc(d.cwd)}` : d.kind === 'write' ? `文件：${esc(d.path)}<pre>${esc(d.preview || '')}</pre>` : d.path ? esc(d.path) : '';
-  const e = h('div', 'confirm', `<b>需要你确认</b>　${esc(it.q)}${body ? '<div>' + body + '</div>' : ''}<div class="acts">${it.answered ? '<span class="hint">' + esc(it.answered) + '</span>' : '<button class="btn pri" data-ok="1">同意</button>' + (d.kind === 'delete' ? '' : '<button class="btn" data-ok="1" data-all="1" title="这一轮任务里后面的写文件、改文件、命令都不再问；删除和危险命令仍会单独问">本次任务全部同意</button>') + '<button class="btn" data-ok="0">拒绝</button>'}</div>`);
+  const items = d.kind === 'batch' ? d.items || [] : [{ q: it.q, detail: d }];
+  const hasDel = items.some((x) => x.detail && x.detail.kind === 'delete');
+  const dels = items.length > 1 ? items.filter((x) => x.detail && x.detail.kind === 'delete') : [];   // 好几个删除并成一行：移入回收站：a、b、c
+  const lines = (dels.length > 1 ? items.filter((x) => !dels.includes(x)) : items).map((x) => confirmItem(x.q, x.detail));
+  if (dels.length > 1) lines.unshift(`<div class="ci">移入回收站：${dels.map((x) => '<span title="' + esc(x.detail.path || '') + '">' + esc(String(x.q).replace(/^把 (.+) 移入回收站$/, '$1')) + '</span>').join('、')}</div>`);
+  const e = h('div', 'confirm', `<b>需要你确认${items.length > 1 ? '（' + items.length + ' 项）' : ''}</b>${lines.join('')}<div class="acts">${it.answered ? '<span class="hint">' + esc(it.answered) + '</span>' : '<button class="btn pri" data-ok="1">' + (items.length > 1 ? '全部同意' : '同意') + '</button>' + (hasDel ? '' : '<button class="btn" data-ok="1" data-all="1" title="这一轮任务里后面的写文件、改文件、命令都不再问；删除和危险命令仍会单独问">本次任务全部同意</button>') + '<button class="btn" data-ok="0">拒绝</button>'}</div>`);
+  e.querySelectorAll('pre.cq').forEach((p) => p.onclick = () => p.classList.toggle('open'));
   e.dataset.cid = it.id;
   e.querySelectorAll('button').forEach((b) => b.onclick = () => api('/api/confirm', { id: it.id, ok: b.dataset.ok === '1', all: b.dataset.all === '1' }).catch((er) => { const a = e.querySelector('.acts'); if (a) a.innerHTML = '<span class="hint">没点成功：' + esc(String(er.message || er)) + '（这条可能已过期，让 AI 重做一遍）</span>'; }));
   return e;

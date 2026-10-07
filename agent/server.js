@@ -31,7 +31,7 @@ const busyMsg = (what) => busyDoing() + '，现在不能' + what + '。等它做
 let unattended = false;
 let allowAll = false;   // 用户点了「本次任务全部同意」：这一轮里不再逐条问（删除和危险命令除外）
 const DANGER = /\b(Remove-Item|rm|rmdir|del|erase|format|diskpart|shutdown|Restart-Computer|Stop-Computer|reg(\.exe)?\s+(add|delete)|Set-ExecutionPolicy|net\s+user|schtasks|taskkill|Stop-Process|bcdedit|cipher)\b/i;
-const isRisky = (d) => !!d && (d.kind === 'delete' || (d.kind === 'command' && DANGER.test(String(d.command || ''))));
+const isRisky = (d) => !!d && (d.kind === 'batch' ? (d.items || []).some((x) => isRisky(x.detail)) : d.kind === 'delete' || (d.kind === 'command' && DANGER.test(String(d.command || ''))));
 const queue = { items: [], cancel: false };
 // ---------- 学习循环（2026-10-06 用户设定）：说"请学习/继续学"就一直跑，每轮学完自动开下一轮，只在聊天框汇报，不弹确认；说"停止学习"或点急停才停 ----------
 const learn = { on: false, round: 0, stopped: false, inbox: [], yielding: false, since: 0 };
@@ -41,7 +41,7 @@ const LEARNF = path.join(__dirname, 'learn.json');
 const saveLearn = (on) => { try { if (on) fs.writeFileSync(LEARNF, JSON.stringify({ on: true, round: learn.round, since: learn.since || Date.now() })); else if (fs.existsSync(LEARNF)) fs.unlinkSync(LEARNF); } catch (e) {} };
 saveLearn(false); process.on('exit', () => saveLearn(false));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const LEARN_PROMPT = () => '（学习循环第 ' + learn.round + ' 轮：本轮按自学计划深挖 1~2 个主题。本轮结束时，用简短的进度汇报收尾：学了哪些主题、结果存到哪个文件、下一轮准备学什么。不要问问题、不要等指示——下一轮会自动开始，直到用户说"停止学习"。）';
+const LEARN_PROMPT = () => '（学习第 ' + learn.round + ' 轮：按自学计划学 1~2 个主题，存进知识库。最后只写一行：学了什么 → 存在哪 → 下一轮学什么。）';
 function stopLearn(reason) {
   if (!learn.on) return;
   learn.on = false; learn.stopped = true; learn.inbox = []; saveLearn(false);
@@ -73,7 +73,8 @@ function persist() {
   if (!cur || !dirty || !hasUser()) return;
   const messages = core.getHistory().map((m) => { const c = { ...m }; delete c.images; return c; });
   const rec = { id: cur.id, title: cur.title, created: cur.created, updated: Date.now(), droppedUsers, tr, messages };
-  const f = cfile(cur.id); fs.writeFileSync(f + '.tmp', JSON.stringify(rec)); fs.renameSync(f + '.tmp', f);
+  const f = cfile(cur.id);
+  try { fs.writeFileSync(f + '.tmp', JSON.stringify(rec)); fs.renameSync(f + '.tmp', f); } catch (e) { bbS('保存对话失败（下次再存）', e.message); return; }   // Windows 上杀毒/索引偶尔锁住文件，存不上就下次再存，不能让学习循环因此出错或后台崩掉
   try { const lf = path.join(CONVLOGDIR, cur.id + '.json'); fs.writeFileSync(lf + '.tmp', JSON.stringify(rec)); fs.renameSync(lf + '.tmp', lf); } catch (e) {}
   convs.set(cur.id, { id: cur.id, title: cur.title, updated: rec.updated }); dirty = false;
 }
@@ -167,11 +168,12 @@ function onEvent(type, d) {
 
 function ask(q, detail) {
   if (learn.on) {            // 学习循环：不弹确认，直接自动同意（用户 2026-10-06：学习时不要让我点任何确认）
-    if (isRisky(detail)) { notice('学习循环中，跳过危险操作: ' + q.split('\n')[0]); return Promise.resolve(false); }   // 自动同意不打扰（2026-10-07 用户要求）
+    if (isRisky(detail)) { notice('学习循环中，跳过危险操作: ' + (detail.kind === 'batch' ? detail.items.filter((x) => isRisky(x.detail)).map((x) => x.q.split('\n')[0]).join('；') : q.split('\n')[0])); return Promise.resolve(false); }   // 自动同意不打扰（2026-10-07 用户要求）
     return Promise.resolve(true);
   }
   if (unattended) {          // 无人值守：只允许往 任务结果/草稿/线索 写文件，其余一律拒绝
-    const ok = detail.kind === 'write' && ['任务结果', '草稿', '线索'].some((d) => path.resolve(detail.path).startsWith(path.join(core.WS, d) + path.sep));
+    const okOne = (dt) => dt.kind === 'write' && ['任务结果', '草稿', '线索'].some((d) => path.resolve(dt.path).startsWith(path.join(core.WS, d) + path.sep));
+    const ok = detail.kind === 'batch' ? (detail.items || []).every((x) => okOne(x.detail)) : okOne(detail);
     if (!ok) notice('无人值守，已拒绝: ' + q);
     return Promise.resolve(ok);
   }
@@ -274,7 +276,7 @@ ${text}` : text;
     if (isStopLearnCmd(text)) { if (learn.on) { stopLearn('你说"停止学习"'); } else notice('现在没有在学。说"请学习"我就开始学习循环。'); return; }
     if (isLearnCmd(text)) {
       if (learn.on) { notice('学习循环已经在跑了（第 ' + learn.round + ' 轮），不用重复说。'); return; }
-      runLearnLoop(mtext); return;
+      runLearnLoop(mtext).catch((e) => { bbS('学习循环异常退出', e); notice('学习循环异常退出：' + e.message); }); return;   // 不接住的话一个意外错误就会让整个后台崩掉（unhandledRejection → exit）
     }
     if ((await pw.status()).state === 'off') {
       const g = auto.blocking(); if (g) { offerForce(g, mtext); return; }
@@ -296,15 +298,18 @@ async function runLearnLoop(firstText) {
   // 学到一半检测到游戏：不等这一轮学完，马上打断让出显存
   const gameWatch = setInterval(() => { if (learn.on && busy === '学习循环' && !learn.yielding && auto.blocking() && !auto.get().forced) { learn.yielding = '检测到游戏在运行，学习这一轮先停下，让出显存。'; core.stop(); } }, 3000);
   const pause = async (ms) => { for (let i = 0; i < ms / 100 && learn.on && !learn.inbox.length && !learn.yielding; i++) await sleep(100); };
+  core.setLean(true);   // 学习用小上下文 + 狠压缩，给显卡减负（换上下文大小时 Ollama 会重新载入一次模型，约 7 秒）
   try {
-    let first = true, fails = 0;
+    if (core.ctxUsed() > core.ctxMax() * 0.5) { try { await core.compactNow(); } catch (e) {} }   // 开学前的聊天记录可能比学习用的小上下文还长：先压掉，别让第一轮就被 Ollama 截断
+    let first = true, fails = 0, report = '';
     while (learn.on) {
       try {
         // 1. 用户在学习中发了消息：先回答，答完接着学（10-07 用户：不要有任何会打断学习的机制）
         if (learn.inbox.length) {
           const m = learn.inbox.shift(); learn.yielding = false;
           busy = null; bc('state', {});
-          await doSend(m.text, m.quote, m.att);
+          core.setLean(false);   // 回答用户用正常的上下文、系统提示和全部工具
+          try { await doSend(m.text, m.quote, m.att); } finally { if (learn.on) core.setLean(true); }
           if (!learn.on) break;
           await claim();
           if (!learn.inbox.length) notice('回答完了，接着学习。');
@@ -330,11 +335,16 @@ async function runLearnLoop(firstText) {
         learn.round++; saveLearn(true);
         core.resetStop();
         const prompt = first ? firstText : LEARN_PROMPT();
+        if (!first) {   // 每轮从干净的上下文开始：上一轮的过程全丢掉，只留它最后那段进度汇报（学了什么、存在哪、下一轮学什么）
+          const n = core.getHistory().filter(isRealUser).length;
+          core.setMessages(report ? [{ role: 'system', summary: true, content: '上一轮学习的进度汇报：\n' + report.slice(0, 1500), archive: [] }] : []);
+          if (n) onEvent('dropped', { users: n });
+        }
         first = false;
         if (learn.round > 1) notice('—— 学习循环第 ' + learn.round + ' 轮开始 ——');
         const before = core.getHistory();
         let failed = false;
-        try { await core.turn(prompt); fails = 0; } catch (e) { if (e.name !== 'StopError') { failed = true; fails++; notice('学习循环出错：' + e.message); } }
+        try { const r = await core.turn(prompt, { loop: true }); if (r && r.trim()) report = r.trim(); fails = 0; } catch (e) { if (e.name !== 'StopError') { failed = true; fails++; notice('学习循环出错：' + e.message); } }
         if (!learn.on) break;
         if (learn.inbox.length || learn.yielding) { learn.yielding = false; continue; }   // 被用户插话 / 游戏打断的这一轮不算出错，先去处理
         let waitMs = 2000;   // 本轮结束，等 2 秒喘口气再开下一轮（期间说"停止学习"或急停都能打断）
@@ -361,7 +371,7 @@ async function runLearnLoop(firstText) {
     }
   } finally {
     clearInterval(gameWatch);
-    learn.on = false; learn.yielding = false; saveLearn(false);
+    learn.on = false; learn.yielding = false; saveLearn(false); core.setLean(false);
     if (busy === '学习循环') busy = null;
     persist(); bc('state', {});
     if (!learn.stopped) notice('学习循环结束，共 ' + learn.round + ' 轮。');
@@ -438,7 +448,7 @@ async function state() {
   // 模型在显存里就是在线；不在显存里但没人下线过（画图换模型、Ollama 自己卸载），界面照样显示在线，真要用时自动载入
   if (st.state === 'on') userOffline = false;
   else if (st.state === 'off' && !userOffline) st = Object.assign({}, st, { state: 'on', swapped: true });
-  return { cur: cur.id, curTitle: cur.title, ctxUsed: core.ctxUsed(), ctxMax: cfg.numCtx, cmp: (() => { const c = core.compacted(); return c ? { rounds: c.archive.filter((m) => m.role === 'user' && !String(m.content).startsWith('（这是刚才操作后的屏幕截图')).length, summary: c.summary } : null; })(), convs: [...convs.values()].filter((c) => c.id !== cur.id || hasUser()).sort((a, b) => b.updated - a.updated), online: cfg.online, think: cfg.think, desktop: desk.get(), auto: auto.get(), learn: { on: learn.on, round: learn.round }, bar: bar ? { id: bar.id, kind: bar.kind, name: bar.name, text: bar.text } : null, ai: st, busy, wkLabel: busy ? wkLabel : '', busySince: busy === busyKind ? busySince : Date.now(), ws: core.WS, kbDir: cfg.kbDir, queue, pending: [...pending.entries()].map(([id, p]) => ({ id, q: p.q, detail: p.detail })), asks: [...asks.entries()].map(([id, a]) => ({ id, questions: a.questions })), tr: tr.slice(-200), leadLog: leadLog.slice(-200) };
+  return { cur: cur.id, curTitle: cur.title, ctxUsed: core.ctxUsed(), ctxMax: core.ctxMax(), cmp: (() => { const c = core.compacted(); return c ? { rounds: c.archive.filter((m) => m.role === 'user' && !String(m.content).startsWith('（这是刚才操作后的屏幕截图')).length, summary: c.summary } : null; })(), convs: [...convs.values()].filter((c) => c.id !== cur.id || hasUser()).sort((a, b) => b.updated - a.updated), online: cfg.online, think: cfg.think, desktop: desk.get(), auto: auto.get(), learn: { on: learn.on, round: learn.round }, bar: bar ? { id: bar.id, kind: bar.kind, name: bar.name, text: bar.text } : null, ai: st, busy, wkLabel: busy ? wkLabel : '', busySince: busy === busyKind ? busySince : Date.now(), ws: core.WS, kbDir: cfg.kbDir, queue, pending: [...pending.entries()].map(([id, p]) => ({ id, q: p.q, detail: p.detail })), asks: [...asks.entries()].map(([id, a]) => ({ id, questions: a.questions })), tr: tr.slice(-200), leadLog: leadLog.slice(-200) };
 }
 
 // ---------- HTTP ----------
