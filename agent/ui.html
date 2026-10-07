@@ -144,7 +144,7 @@ textarea{width:100%;padding:10px 12px;border:1px solid var(--line2);border-radiu
 .msg .txt .pg{display:block;height:10.5px}
 .msg .txt b{font-weight:500;color:#fff;letter-spacing:0}
 .msg .txt code{background:rgba(255,255,255,.09);padding:1px 6px;border-radius:6px;font-family:Consolas,"Cascadia Mono","Microsoft YaHei",monospace;font-size:1em}   /* 10-05 跟周围同号（原 .93em 看着小四分之一），字体同代码块 */
-#chat:empty::before{content:'直接说要做什么，比如：\A「写一个 50 字的笑话」\A「把桌面上的 PDF 翻译成中文」\A「查一下知识库里 D600 的参数」\A「读一下 CRM 里的墨西哥客户，写一份跟进建议」';white-space:pre;display:block;padding:48px 20px;line-height:2.1;color:var(--mute)}
+#chat:empty::before,#chat:has(>#wk.idle:only-child)::before{content:'直接说要做什么，比如：\A「写一个 50 字的笑话」\A「把桌面上的 PDF 翻译成中文」\A「查一下知识库里 D600 的参数」\A「读一下 CRM 里的墨西哥客户，写一份跟进建议」';white-space:pre;display:block;padding:48px 20px;line-height:2.1;color:var(--mute)}
 .composer{position:relative}
 #toBottom{display:none;position:absolute;right:24px;top:-44px;width:32px;height:32px;align-items:center;justify-content:center;border:0;border-radius:50%;background:var(--raise);color:var(--ink);cursor:pointer;font-size:16px;line-height:1;box-shadow:0 2px 10px rgba(0,0,0,.4);z-index:5}
 #toBottom:hover{background:#4a4a4a}
@@ -193,11 +193,17 @@ textarea{width:100%;padding:10px 12px;border:1px solid var(--line2);border-radiu
 #wk i{width:28px;height:28px;flex:none;margin:-4px 0}
 #wk i svg{width:100%;height:100%;display:block;overflow:visible}
 #wk i circle{fill:#e5484d}
-#wk span{background:linear-gradient(90deg,var(--mute) 35%,#fff 50%,var(--mute) 65%) 0 0/250% 100%;-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;animation:wkshine 2.2s linear infinite}
+#wk>span{background:linear-gradient(90deg,var(--mute) 35%,#fff 50%,var(--mute) 65%) 0 0/250% 100%;-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;animation:wkshine 2.2s linear infinite}
 @keyframes wkstar{0%{transform:rotate(0) scale(.72);opacity:.55}50%{transform:rotate(180deg) scale(1.08);opacity:1}100%{transform:rotate(360deg) scale(.72);opacity:.55}}
 @keyframes wkshine{from{background-position:100% 0}to{background-position:-100% 0}}
-@media (prefers-reduced-motion:reduce){#wk span{animation:none}}
+@media (prefers-reduced-motion:reduce){#wk>span{animation:none}}
 #wk b{font-weight:400;font-variant-numeric:tabular-nums}
+#wk em{font-style:normal;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;opacity:.75}
+#wk:not(.idle) em:not(:empty)::before{content:'·';margin-right:10px}
+#wk em .hot{color:#e5484d}
+#wk.idle i,#wk.idle>span,#wk.idle>b{display:none}
+.notice.rc{display:flex;align-items:center;gap:12px;font-size:13px;opacity:.85}   /* 撤回提示：居中、两边细线，和 AI 说的话区分开 */
+.notice.rc::before,.notice.rc::after{content:'';flex:1;height:1px;background:var(--line2)}
 .confirm{margin-bottom:10px;background:var(--side);border:1px solid var(--line2);border-radius:var(--r);padding:14px 16px}
 .confirm b{color:var(--warn)}
 .confirm pre{margin:8px 0;padding:10px 12px;background:var(--bg);border-radius:8px;font-family:var(--mono);font-size:var(--f1);white-space:pre-wrap;word-break:break-all;max-height:200px;overflow:auto}
@@ -331,16 +337,6 @@ nav .cv{font-size:13.5px}
 #newConvBtn svg{width:15px;height:15px;flex:none;margin-left:-2px}
 /* 显卡那一行：往上提，贴近对话栏顶部（#chat 顶部本来留了 28px） */
 #gpu{margin-top:-20px}
-/* 常驻状态条：显卡状态 + 你最近一次的动作，同一行，不随对话滚动 */
-#gbar{flex:none;display:flex;align-items:center;gap:18px;padding:3px 20px;font-size:var(--f2);color:var(--mute);white-space:nowrap;overflow:hidden}
-#gpuT{flex:none;color:var(--mute)}
-#gbar{font-variant-numeric:tabular-nums}
-#gbar{--gbf:15px}   /* 这一栏所有字的字号只改这一处 */
-#gpuT,#memT,#actT{font-size:var(--gbf)}
-#gbar{line-height:1.3;padding-top:2px;padding-bottom:2px}
-#gbar{min-height:calc(var(--gbf) * 1.3 + 4px)}   /* 显卡数据晚到半秒：先按有字时的高度占好位，刷新时对话区就不会被往下推 */
-#memT{flex:none;color:var(--mute);margin-left:22px}
-#actT{margin-left:auto;min-width:0;overflow:hidden;text-overflow:ellipsis}
 #chat{padding-top:10px}
 .toprow .botic{cursor:pointer}
 .toprow .botic.spin{opacity:.4;transition:opacity .15s}
@@ -537,7 +533,6 @@ html.loading body{visibility:hidden}
 <main>
   <div id="choiceBar" style="display:none"><span id="choiceText"></span><button class="btn stop" id="choiceForce">强制上线</button><button class="btn" id="choiceNot">这不是游戏</button><button class="btn" id="choiceCancel">取消（游戏关闭后自动上线）</button><button class="btn" id="choiceAck">知道了</button></div>
   <section class="page on" id="p-chat">
-    <div id="gbar"><span id="gpuT"></span><span id="memT"></span><span id="actT"></span></div>
     <div id="peekBar" style="display:none"><span id="peekText"></span><button class="btn pri" id="peekGo" style="display:none">在这里继续聊</button><button class="btn" id="peekBack">回到当前任务</button></div>
     <div id="chat"></div>
     <div class="composer">
@@ -778,7 +773,7 @@ async function peekConv(id) {
   let r; try { r = await api('/api/conv/view?id=' + encodeURIComponent(id)); } catch (e) { uiAlert(e.message); return; }
   peek = { id: r.id, title: r.title || '新对话' };
   closeLive(); const w = document.getElementById('wk'); if (w) w.remove();
-  chat.classList.add('peek'); chat.innerHTML = ''; $('#actT').textContent = '';
+  chat.classList.add('peek'); chat.innerHTML = '';
   window.__loadingChat = true;
   (r.tr || []).forEach((it) => { if (it.role === 'confirm' && !it.answered) it = { ...it, answered: '已过期' }; if (it.role === 'ask' && !it.answered) return; add(it); });
   window.__loadingChat = false;
@@ -799,7 +794,7 @@ $('#peekGo').onclick = async () => { const id = peek && peek.id; if (!id) return
 async function delConv(c) { if (!(await uiConfirm('删除对话「' + (c.title || '新对话') + '」？删除后不能恢复。', true))) return; if (peek && peek.id === c.id) await endPeek(); await convCall('delete', c.id); }
 function loadChat() {
   if (peek) return;   // 只读查看中：别把当前任务的记录画进来，回到当前任务时再画
-  chat.innerHTML = ''; $('#actT').textContent = ''; window.__loadingChat = true; (S.tr || []).forEach(add); window.__loadingChat = false;
+  chat.innerHTML = ''; window.__loadingChat = true; (S.tr || []).forEach(add); window.__loadingChat = false;
   (S.pending || []).forEach((p) => { if (!chat.querySelector('.confirm[data-cid="' + p.id + '"]')) add({ role: 'confirm', id: p.id, q: p.q, detail: p.detail }); });
   chat.scrollTop = chat.scrollHeight; paintConvs(); if (typeof gpuPaint === 'function') gpuPaint();
 }
@@ -871,11 +866,11 @@ chat.addEventListener('click', (e) => {
 function add(it) {
   if (it.hidden) return;
   const stick = atBottom(); let el;
-  if (it.role === 'user') { $('#actT').textContent = ''; el = h('div', 'msg user', `<div class="who">你</div><div class="col">${it.quote ? `<div class="quote"><b>引用 ${it.quote.who === 'ai' ? 'AI' : '你'}</b>${esc(it.quote.text)}</div>` : ''}<div class="txt">${esc(it.text)}</div>${imgStripPaths(it.paths)}<div class="macts"><button type="button" class="ma cp" title="复制">${CP_SVG16}</button><button type="button" class="ma qt" title="引用">${QT_SVG}</button><button type="button" class="ma ed" title="撤回，放回输入框">${UN_SVG}</button></div></div>`); el.dataset.raw = it.text; }
+  if (it.role === 'user') { el = h('div', 'msg user', `<div class="who">你</div><div class="col">${it.quote ? `<div class="quote"><b>引用 ${it.quote.who === 'ai' ? 'AI' : '你'}</b>${esc(it.quote.text)}</div>` : ''}<div class="txt">${esc(it.text)}</div>${imgStripPaths(it.paths)}<div class="macts"><button type="button" class="ma cp" title="复制">${CP_SVG16}</button><button type="button" class="ma qt" title="引用">${QT_SVG}</button><button type="button" class="ma ed" title="撤回，放回输入框">${UN_SVG}</button></div></div>`); el.dataset.raw = it.text; }
   else if (it.role === 'ai') { el = h('div', 'msg ai', `<div class="who">AI</div><div class="txt">${fmt(it.text)}</div><div class="macts"><button type="button" class="ma cp" title="复制">${CP_SVG16}</button><button type="button" class="ma qt" title="引用">${QT_SVG}</button><button type="button" class="ma rt" title="重新回答">${RT_SVG}</button></div>`); el.dataset.raw = it.text; if (!it.done) el.dataset.live = '1'; }
   else if (it.role === 'result' && it.name === 'generate_image') el = h('div', 'notice', linkPaths(it.text || '').split(String.fromCharCode(10)).join('<br>'));   // 图画好后才显示：路径 + 模型/尺寸/种子那句
   else if (it.role === 'tool' || it.role === 'result') return;   // 不再显示「扳手 + 调用工具」那一行，只看最终结果；底部动画文字照常显示在干什么（要恢复：改回 stepAdd(it); return;）
-  else if (it.role === 'notice') { if (/^桌面控制已(打开|关闭)/.test(it.text)) return; if (/^你撤回/.test(it.text)) $('#actT').textContent = it.text.replace(/。$/, ''); el = h('div', 'notice', esc(it.text)); if (/^出错[：:]/.test(it.text)) { const rb = h('button', 'retry', '重试'); rb.type = 'button'; rb.onclick = () => { rb.disabled = true; retryLast(); }; el.appendChild(rb); } }
+  else if (it.role === 'notice') { if (/^桌面控制已(打开|关闭)/.test(it.text)) return; el = h('div', /撤回/.test(it.text) ? 'notice rc' : 'notice', esc(it.text)); if (/^出错[：:]/.test(it.text)) { const rb = h('button', 'retry', '重试'); rb.type = 'button'; rb.onclick = () => { rb.disabled = true; retryLast(); }; el.appendChild(rb); } }
   else if (it.role === 'confirm') el = confirmEl(it);
   else if (it.role === 'ask') el = askEl(it);
   if (el && it.mid) el.dataset.mid = it.mid;
@@ -907,7 +902,7 @@ function stepAdd(it) {
 // AI 一次回答 = 两条「你的话」之间的所有块（上线提示、步骤圈、回复）；悬停任一块，竖线拉通整组
 const aiLine = h('div', '', ''); aiLine.id = 'aiLine'; document.body.appendChild(aiLine);
 // 你自己的动作（撤回、急停）、显卡那一行，不算 AI 说的话
-const isAiBlk = (e) => e && e.id !== 'gpu' && !e.classList.contains('user') && !(e.classList.contains('notice') && /^(你撤回|已急停|没发出去)/.test(e.textContent));
+const isAiBlk = (e) => e && e.id !== 'gpu' && !(e.id === 'wk' && e.classList.contains('idle')) && !e.classList.contains('user') && !(e.classList.contains('notice') && /^(你撤回|已急停|没发出去)/.test(e.textContent));
 // 按鼠标的上下位置找块：块与块之间的空隙两边属于同一次回答时竖条不动，不再一藏一显地闪
 let aiLineKey = '';
 function hideAiLine() { aiLineKey = ''; aiLine.style.display = 'none'; }
@@ -1103,21 +1098,17 @@ async function send() {
   catch (e) { atts.unshift(...files); paintAtts(); add({ role: 'notice', text: '没发出去：' + e.message }); }
   refresh();
 }
-// 显卡实时状态：固定放在对话最上面
+// 显卡/内存实时状态（极简）：跟在对话最下面那行「已 xx 秒」后面；AI 空闲时这一行只显示它
 let gpuD = null;
-function gpuPaint() {
-  const el = document.getElementById('gpuT'), me = document.getElementById('memT');
-  if (!gpuD) { el.textContent = ''; me.textContent = ''; return; }
-  const f1 = (v) => Number(v).toFixed(1);
-  if (gpuD.memTotal) {
-    const p = Math.round(gpuD.memUsed / gpuD.memTotal * 100);
-    me.textContent = `内存 ${p}% ${f1(gpuD.memUsed)} / ${f1(gpuD.memTotal)} GB` + (gpuD.virtTotal ? `  虚拟内存 ${f1(gpuD.virtUsed)} / ${f1(gpuD.virtTotal)} GB` : '');
-  }
-  const line = (busy, util, used) => `显卡 ${gpuD.name || ''}：${busy ? '运算中' : '空闲中'} ${util}% 显存 ${f1(used)} / ${gpuD.total || '?'} GB`;
-  // 显卡这一段按最宽的内容定宽（数字变化时右边的内存不会移动），数字本身不补位
-  if (!el._w) { el.style.minWidth = '0'; el.textContent = line(true, 100, gpuD.total || 0); el._w = el.offsetWidth; el.style.minWidth = el._w + 'px'; }
-  el.textContent = line(gpuD.util >= 20, gpuD.util, gpuD.used);
+function hwHTML() {
+  if (!gpuD) return '';
+  const f1 = (v) => Number(v).toFixed(1), f0 = (v) => Math.round(Number(v)), p = [];
+  if (gpuD.total) p.push(`<span title="${esc(gpuD.name || '显卡')}：${gpuD.util >= 20 ? '运算中' : '空闲中'}">显卡 <span class="${gpuD.util >= 20 ? 'hot' : ''}">${gpuD.util}%</span> ${f1(gpuD.used)}/${gpuD.total}G</span>`);
+  if (gpuD.memTotal) p.push(`<span title="内存 ${f1(gpuD.memUsed)} / ${f1(gpuD.memTotal)} GB">内存 ${Math.round(gpuD.memUsed / gpuD.memTotal * 100)}%</span>`);
+  if (gpuD.virtTotal) p.push(`<span title="虚拟内存 ${f1(gpuD.virtUsed)} / ${f1(gpuD.virtTotal)} GB">虚拟 ${f0(gpuD.virtUsed)}/${f0(gpuD.virtTotal)}G</span>`);
+  return p.join(' · ');
 }
+function gpuPaint() { const em = document.querySelector('#wk em'); if (!em) return; const v = hwHTML(); if (em._hw !== v) em.innerHTML = em._hw = v; }
 // 思考动画：8 个红色小球，像毒液的共生体那样彼此融合。
 // 每一轮：摆成一个形状 → 8 颗两两粘成 4 团 → 再粘成 2 团 → 粘成 1 团（在团里蠕动）→ 倒着一层层分裂 → 长成另一个形状（每次随机换，不和上一个重复）
 // 形状有三个：立方体、晶格（立方晶体，原子在原位热振动）、三叶结（数学里最简单的纽结，球沿着它追）。整体绕竖轴转、固定斜着看
@@ -1169,14 +1160,19 @@ let wkCyc = -1, wkCur = 0, wkNxt = 1, wkGA = null, wkGB = null;
 const wk = { t0: 0, last: 0, label: '' };
 setInterval(() => {
   let el = document.getElementById('wk');
-  if (peek) { if (el) el.remove(); return; }   // 只读查看中不显示当前任务的进度动画
-  if (!S.busy) { wk.t0 = 0; wk.kind = ''; if (el) el.remove(); return; }
-  if (S.busy === '学习循环' && wk.kind === S.busy && S.busySince > wk.t0) wk.t0 = S.busySince;   // 学习每开一轮，计时从 0 重新算
-  if (!wk.t0 || wk.kind !== S.busy) { wk.t0 = wk.last = Date.now(); if (S.busySince && S.busySince <= wk.t0) wk.t0 = S.busySince; wk.label = ''; wk.kind = S.busy; if (S.busySince && Date.now() - S.busySince > 2000) wk.last = Date.now() - 2000; }   // 刷新页面时 AI 早就在忙：别再藏 1.5 秒   // 任何要长时间运算的活（对话、任务队列、线索挖掘、上线下线）都显示
-  if (!el) el = h('div', '', '<i></i><span></span><b></b>'), el.id = 'wk', wkBalls(el.firstChild);
+  if (!S.busy) { wk.t0 = 0; wk.kind = ''; }
+  const run = S.busy && !peek;   // 只读查看中不显示当前任务的进度动画，只留硬件数据
+  if (!run && !gpuD) { if (el) el.remove(); return; }
+  if (run && S.busy === '学习循环' && wk.kind === S.busy && S.busySince > wk.t0) wk.t0 = S.busySince;   // 学习每开一轮，计时从 0 重新算
+  if (run && (!wk.t0 || wk.kind !== S.busy)) { wk.t0 = wk.last = Date.now(); if (S.busySince && S.busySince <= wk.t0) wk.t0 = S.busySince; wk.label = ''; wk.kind = S.busy; if (S.busySince && Date.now() - S.busySince > 2000) wk.last = Date.now() - 2000; }   // 刷新页面时 AI 早就在忙：别再藏 1.5 秒   // 任何要长时间运算的活（对话、任务队列、线索挖掘、上线下线）都显示
+  if (!el) el = h('div', '', '<i></i><span></span><b></b><em></em>'), el.id = 'wk', wkBalls(el.firstChild);
+  el.classList.toggle('idle', !run);
   const stick = atBottom();
-  el.children[1].textContent = chat.querySelector('.confirm [data-ok]') ? '正在等你点「同意」或「拒绝」' : wk.label || S.wkLabel || (S.busy === '对话' ? '正在等模型回答' : '正在' + S.busy);
-  el.children[2].textContent = '已 ' + Math.round((Date.now() - wk.t0) / 1000) + ' 秒';
+  if (run) {
+    el.children[1].textContent = chat.querySelector('.confirm [data-ok]') ? '正在等你点「同意」或「拒绝」' : wk.label || S.wkLabel || (S.busy === '对话' ? '正在等模型回答' : '正在' + S.busy);
+    el.children[2].textContent = '已 ' + Math.round((Date.now() - wk.t0) / 1000) + ' 秒';
+  }
+  gpuPaint();
   if (chat.lastElementChild !== el) { chat.appendChild(el); if (stick) chat.scrollTop = chat.scrollHeight; }
 }, 400);
 let quoted = null;
@@ -1454,9 +1450,9 @@ function connect() {
   // 只读查看中：当前任务的实时内容先不往屏幕上画（服务器都记着），回到当前任务时一次画全
   { const PEEK_SKIP = new Set(['token', 'user', 'tool', 'toolresult', 'notice', 'noticeupd', 'error', 'stopped', 'done', 'confirm', 'ask', 'ask_done', 'confirm_done', 'cleared', 'conv', 'shot']);
     const al = es.addEventListener.bind(es); es.addEventListener = (t, f) => al(t, (e) => { if (peek && PEEK_SKIP.has(t)) { if (t === 'done' || t === 'stopped' || t === 'conv') refresh(); return; } f(e); }); }
-  es.addEventListener('token', (e) => { $('#actT').textContent = ''; const d = JSON.parse(e.data); liveAI(d.text, d.mid); });
+  es.addEventListener('token', (e) => { const d = JSON.parse(e.data); liveAI(d.text, d.mid); });
   es.addEventListener('user', (e) => { closeLive(); add(Object.assign({ role: 'user' }, JSON.parse(e.data))); });
-  es.addEventListener('tool', (e) => { $('#actT').textContent = ''; closeLive(); add(Object.assign({ role: 'tool' }, JSON.parse(e.data))); });
+  es.addEventListener('tool', (e) => { closeLive(); add(Object.assign({ role: 'tool' }, JSON.parse(e.data))); });
   es.addEventListener('toolresult', (e) => add(Object.assign({ role: 'result' }, JSON.parse(e.data))));
   es.addEventListener('notice', (e) => { closeLive(); add({ role: 'notice', text: JSON.parse(e.data).text }); });
   es.addEventListener('noticeupd', (e) => { const d = JSON.parse(e.data); const el = chat.querySelector('[data-mid="' + d.mid + '"]'); if (el) el.textContent = d.text; wk.label = ''; });
@@ -1469,7 +1465,7 @@ function connect() {
   es.addEventListener('confirm_done', (e) => { const d = JSON.parse(e.data); const el = chat.querySelector(`.confirm[data-cid="${d.id}"] .acts`); if (el) el.innerHTML = `<span class="hint">${esc(d.answered || '已处理')}</span>`; });
   es.addEventListener('files', () => { if ($('#p-files').classList.contains('on')) loadFiles(); });
   es.addEventListener('state', refresh); es.addEventListener('bar', refresh);
-  es.addEventListener('cleared', () => { chat.innerHTML = ''; $('#actT').textContent = ''; paintConvs(); });
+  es.addEventListener('cleared', () => { chat.innerHTML = ''; paintConvs(); });
   es.addEventListener('conv', async () => { const prev = S.cur, st = chat.scrollTop; await refresh(); loadChat(); if (S.cur === prev) chat.scrollTop = st; else setQuote(null); });
   es.addEventListener('queue', (e) => paintQueue(JSON.parse(e.data)));
   es.addEventListener('shot', (e) => { let el = chat.querySelector('.shot'); const stick = atBottom(); if (!el) { el = h('div', 'shot', '<div class="hint">AI 看到的屏幕（最新一张）</div><img>'); chat.appendChild(el); } else chat.appendChild(el); el.querySelector('img').src = 'data:image/png;base64,' + JSON.parse(e.data).b64; if (stick) chat.scrollTop = chat.scrollHeight; });
