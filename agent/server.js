@@ -283,19 +283,26 @@ ${text}` : text;
 async function runLearnLoop(firstText) {
   learn.on = true; learn.stopped = false; learn.round = 0;
   busy = '学习循环'; bc('state', {});
+  core.setLean(true);   // 学习用小上下文 + 狠压缩，给显卡减负（换上下文大小时 Ollama 会重新载入一次模型，约 7 秒）
   notice('学习循环开始：每轮学完自动开下一轮，只在聊天框汇报进度。说"停止学习"或点急停才停。');
   try {
     if ((await pw.status()).state === 'off') bootNotice();
-    let first = true, fails = 0;
+    if (core.ctxUsed() > core.ctxMax() * 0.5) { try { await core.compactNow(); } catch (e) {} }   // 开学前的聊天记录可能比学习用的小上下文还长：先压掉，别让第一轮就被 Ollama 截断
+    let first = true, fails = 0, report = '';
     while (learn.on) {
       learn.round++;
       core.resetStop();
       const prompt = first ? firstText : LEARN_PROMPT();
+      if (!first) {   // 每轮从干净的上下文开始：上一轮的过程全丢掉，只留它最后那段进度汇报（学了什么、存在哪、下一轮学什么）
+        const n = core.getHistory().filter(isRealUser).length;
+        core.setMessages(report ? [{ role: 'system', summary: true, content: '上一轮学习的进度汇报：\n' + report.slice(0, 1500), archive: [] }] : []);
+        if (n) onEvent('dropped', { users: n });
+      }
       first = false;
       if (learn.round > 1) notice('—— 学习循环第 ' + learn.round + ' 轮开始 ——');
       const before = core.getHistory();
       let failed = false;
-      try { await core.turn(prompt, { loop: true }); fails = 0; } catch (e) { if (e.name !== 'StopError') { failed = true; fails++; notice('学习循环出错：' + e.message); } }
+      try { const r = await core.turn(prompt, { loop: true }); if (r && r.trim()) report = r.trim(); fails = 0; } catch (e) { if (e.name !== 'StopError') { failed = true; fails++; notice('学习循环出错：' + e.message); } }
       if (!learn.on) break;
       if (learn.stopped) break;
       let waitMs = 2000;   // 本轮结束，等 2 秒喘口气再开下一轮（期间说"停止学习"或急停都能打断）
@@ -314,7 +321,7 @@ async function runLearnLoop(firstText) {
       for (let i = 0; i < waitMs / 100 && learn.on; i++) await new Promise((r) => setTimeout(r, 100));
     }
   } finally {
-    learn.on = false;
+    learn.on = false; core.setLean(false);
     if (busy === '学习循环') busy = null;
     persist(); bc('state', {});
     if (!learn.stopped) notice('学习循环结束，共 ' + learn.round + ' 轮。');
@@ -391,7 +398,7 @@ async function state() {
   // 模型在显存里就是在线；不在显存里但没人下线过（画图换模型、Ollama 自己卸载），界面照样显示在线，真要用时自动载入
   if (st.state === 'on') userOffline = false;
   else if (st.state === 'off' && !userOffline) st = Object.assign({}, st, { state: 'on', swapped: true });
-  return { cur: cur.id, curTitle: cur.title, ctxUsed: core.ctxUsed(), ctxMax: cfg.numCtx, cmp: (() => { const c = core.compacted(); return c ? { rounds: c.archive.filter((m) => m.role === 'user' && !String(m.content).startsWith('（这是刚才操作后的屏幕截图')).length, summary: c.summary } : null; })(), convs: [...convs.values()].filter((c) => c.id !== cur.id || hasUser()).sort((a, b) => b.updated - a.updated), online: cfg.online, think: cfg.think, desktop: desk.get(), auto: auto.get(), learn: { on: learn.on, round: learn.round }, bar: bar ? { id: bar.id, kind: bar.kind, name: bar.name, text: bar.text } : null, ai: st, busy, wkLabel: busy ? wkLabel : '', busySince: busy === busyKind ? busySince : Date.now(), ws: core.WS, kbDir: cfg.kbDir, queue, pending: [...pending.entries()].map(([id, p]) => ({ id, q: p.q, detail: p.detail })), asks: [...asks.entries()].map(([id, a]) => ({ id, questions: a.questions })), tr: tr.slice(-200), leadLog: leadLog.slice(-200) };
+  return { cur: cur.id, curTitle: cur.title, ctxUsed: core.ctxUsed(), ctxMax: core.ctxMax(), cmp: (() => { const c = core.compacted(); return c ? { rounds: c.archive.filter((m) => m.role === 'user' && !String(m.content).startsWith('（这是刚才操作后的屏幕截图')).length, summary: c.summary } : null; })(), convs: [...convs.values()].filter((c) => c.id !== cur.id || hasUser()).sort((a, b) => b.updated - a.updated), online: cfg.online, think: cfg.think, desktop: desk.get(), auto: auto.get(), learn: { on: learn.on, round: learn.round }, bar: bar ? { id: bar.id, kind: bar.kind, name: bar.name, text: bar.text } : null, ai: st, busy, wkLabel: busy ? wkLabel : '', busySince: busy === busyKind ? busySince : Date.now(), ws: core.WS, kbDir: cfg.kbDir, queue, pending: [...pending.entries()].map(([id, p]) => ({ id, q: p.q, detail: p.detail })), asks: [...asks.entries()].map(([id, a]) => ({ id, questions: a.questions })), tr: tr.slice(-200), leadLog: leadLog.slice(-200) };
 }
 
 // ---------- HTTP ----------

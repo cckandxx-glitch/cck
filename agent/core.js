@@ -436,13 +436,16 @@ ${memory() ? `你记住的关于用户的事（来自 ${MEMF}）：\n${memory()}
 8. 给链接一律从工具结果里原样照抄，不许自己解码、改写、调换字词顺序或拼接；查不到原地址就说没有。叫用户"打开这个链接"时，链接就写在这句话里（写成 [说明](网址) 或直接贴网址），不要让他回头去找。`;
   let messages = [{ role: 'system', content: SYSTEM() }];
   const trimHistory = () => {
-    if (JSON.stringify(messages).length < cfg.numCtx * 3) return;   // 没有真实用量时的粗略保险，正常由 compact 按用量收拾
+    if (JSON.stringify(messages).length < ctxN() * 3) return;   // 没有真实用量时的粗略保险，正常由 compact 按用量收拾
     for (const m of messages) if (m.role === 'tool' && m.content.length > 400) { m.full = m.full || m.content; m.content = m.content.slice(0, 300) + '…（旧结果已压缩）'; }
   };
   // 上下文只有 numCtx 个 token，超了 Ollama 会悄悄丢掉前面的内容。按上一次真实用量提前收拾：
   // 超 70%：旧工具结果和旧图片压缩；超 85%：把较早的一半对话让模型压成摘要（和旧摘要合并），原文从记忆里移除。
   // 摘要存成历史里的一条 { role:'system', summary:true }，跟着对话一起保存；发给模型时并进系统提示。
   let lastUsed = 0, subDenied = false;
+  // 学习模式（学习循环开着时）：上下文开小一点（learnCtx，默认 16384），省一半 KV 缓存的显存；压缩也更狠——学习的过程记录用户不翻，进度都在文件里
+  let lean = false;
+  const ctxN = () => (lean ? cfg.learnCtx || 16384 : cfg.numCtx);
   const realUser = (m) => m.role === 'user' && !String(m.content).startsWith('（这是刚才操作后的屏幕截图');
   const isSummary = (m) => m.role === 'system' && m.summary;
   const SUM_HEAD = '【本次对话更早部分的摘要】（原文已从你的记忆里移除；需要细节就重新查文件或问用户）\n';
@@ -456,11 +459,12 @@ ${memory() ? `你记住的关于用户的事（来自 ${MEMF}）：\n${memory()}
       else if (m.role === 'assistant') { if (m.content) t += 'AI：' + cap(m.content, 1500) + '\n'; for (const c of m.tool_calls || []) t += 'AI 调用 ' + c.function.name + ' ' + cap(JSON.stringify(c.function.arguments), 300) + '\n'; }
       else if (m.role === 'tool') t += '  结果（' + m.tool_name + '）：' + cap(m.content, 400) + '\n';
     }
-    if (t.length > 30000) t = t.slice(0, 12000) + '\n……（中间省略）……\n' + t.slice(-18000);
+    const L = Math.min(30000, Math.round(ctxN() * 0.8));   // 要压的记录本身也得装得进上下文（学习模式只有 16K）
+    if (t.length > L) t = t.slice(0, Math.round(L * 0.4)) + '\n……（中间省略）……\n' + t.slice(-Math.round(L * 0.6));
     const prompt = '下面是用户和 AI 助手较早的一段对话记录' + (prev ? '，以及再早之前的摘要' : '') + '。请把它们合并压缩成一份要点摘要，给 AI 自己接着干活用。\n必须保留：用户提的要求和偏好、已经定下的决定和结论、涉及的文件路径/网址/数字/人名/型号、事情做到了哪一步、还没完成的事。\n不要客套，不要评价，用简短的条目，总共不超过 800 字。\n\n' + (prev ? '【再早之前的摘要】\n' + prev + '\n\n' : '') + '【对话记录】\n' + t;
     abortCtl = new AbortController(); const tm = setTimeout(() => abortCtl.abort(), 240000);
     try {
-      const r = await fetch(cfg.ollama + '/api/chat', { method: 'POST', signal: abortCtl.signal, body: JSON.stringify({ model: cfg.model, stream: false, think: false, keep_alive: -1, messages: [{ role: 'user', content: prompt }], options: { num_ctx: cfg.numCtx, num_predict: 1500, temperature: 0.2 } }) });
+      const r = await fetch(cfg.ollama + '/api/chat', { method: 'POST', signal: abortCtl.signal, body: JSON.stringify({ model: cfg.model, stream: false, think: false, keep_alive: -1, messages: [{ role: 'user', content: prompt }], options: { num_ctx: ctxN(), num_predict: 1500, temperature: 0.2 } }) });
       if (!r.ok) throw new Error('Ollama 返回 ' + r.status);
       return String((await r.json()).message.content || '').replace(/<think>[\s\S]*?<\/think>/g, '').trim();
     } finally { clearTimeout(tm); }
@@ -474,11 +478,12 @@ ${memory() ? `你记住的关于用户的事（来自 ${MEMF}）：\n${memory()}
   };
   // force：用户点了左上角的圈手动压缩——不看用量，除最近一轮外全部压成摘要；返回压掉的轮数（0 = 没东西可压）
   async function compact(force) {
-    if (!force && lastUsed < cfg.numCtx * 0.7) return 0;
+    const tidyAt = lean ? 0.5 : 0.7, foldAt = lean ? 0.6 : 0.85, keepN = lean ? 4 : 8;
+    if (!force && lastUsed < ctxN() * tidyAt) return 0;
     let n = 0;
-    const keepFrom = Math.max(1, messages.length - 8);
+    const keepFrom = Math.max(1, messages.length - keepN);
     for (let i = 1; i < keepFrom; i++) { const m = messages[i]; if (m.role === 'tool' && m.content.length > 200) { m.full = m.full || m.content; m.content = m.content.slice(0, 150) + '…（旧结果已压缩）'; } if (m.images) delete m.images; if (m.tool_calls) m.tool_calls = m.tool_calls.map(shrinkCall); }
-    if (force || lastUsed >= cfg.numCtx * 0.85) {
+    if (force || lastUsed >= ctxN() * foldAt) {
       const start = isSummary(messages[1] || {}) ? 2 : 1;
       const users = []; for (let i = start; i < messages.length; i++) if (realUser(messages[i])) users.push(i);
       // 要压的范围 [a, b)：够两轮时按轮压，当前这一轮永远不动
@@ -487,7 +492,7 @@ ${memory() ? `你记住的关于用户的事（来自 ${MEMF}）：\n${memory()}
       else if (!force && users.length === 1) {
         // 只剩当前这一轮还是快满了（学习循环一轮能跑上百步）：把这一轮里较早的步骤也压进摘要，本轮的要求和最近几步留着。
         // 不压的话 Ollama 会从前面悄悄截掉，连本轮的要求都丢了，模型就在一轮里原地打转。
-        let e = messages.length - 8; while (e > users[0] + 1 && messages[e].role !== 'assistant') e--;   // 从一条 AI 消息开始留，别把工具结果和它的调用拆开
+        let e = messages.length - keepN; while (e > users[0] + 1 && messages[e].role !== 'assistant') e--;   // 从一条 AI 消息开始留，别把工具结果和它的调用拆开
         if (e - users[0] - 1 >= 4) { a = users[0] + 1; b = e; inRound = true; }
       }
       if (b > a) {
@@ -522,7 +527,7 @@ ${memory() ? `你记住的关于用户的事（来自 ${MEMF}）：\n${memory()}
     finally { clearTimeout(stallT); }
   }
   async function chatOnceRun(extraOpts, arm, noTools) {
-    const body = { model: cfg.model, messages: sendMsgs(), ...(noTools ? {} : { tools: allTools() }), stream: true, think: cfg.think, keep_alive: -1, options: { num_ctx: cfg.numCtx, ...(extraOpts || {}) } };
+    const body = { model: cfg.model, messages: sendMsgs(), ...(noTools ? {} : { tools: allTools() }), stream: true, think: cfg.think, keep_alive: -1, options: { num_ctx: ctxN(), ...(extraOpts || {}) } };
     let r;
     for (let tryN = 0; ; tryN++) {   // Ollama 推理进程偶尔崩一下（500 / 连不上），自己会重启：等几秒重试一次，别让用户重发
       try { r = await fetch(cfg.ollama + '/api/chat', { method: 'POST', signal: abortCtl.signal, body: JSON.stringify(body) }); } catch (e) { if (e.name === 'AbortError' || tryN >= 1) throw e; await new Promise((ok) => setTimeout(ok, 4000)); checkStop(); continue; }
@@ -629,7 +634,7 @@ ${memory() ? `你记住的关于用户的事（来自 ${MEMF}）：\n${memory()}
 
   // 一次性提问（不带工具、不进对话历史），给线索挖掘等流水线用
   async function oneShot(prompt, { json = false, system = '', maxTokens = 600 } = {}) {
-    const r = await fetch(cfg.ollama + '/api/chat', { method: 'POST', body: JSON.stringify({ model: cfg.model, stream: false, think: false, keep_alive: -1, ...(json ? { format: 'json' } : {}), messages: [...(system ? [{ role: 'system', content: system }] : []), { role: 'user', content: prompt }], options: { num_ctx: cfg.numCtx, num_predict: maxTokens, temperature: 0.2 } }) });
+    const r = await fetch(cfg.ollama + '/api/chat', { method: 'POST', body: JSON.stringify({ model: cfg.model, stream: false, think: false, keep_alive: -1, ...(json ? { format: 'json' } : {}), messages: [...(system ? [{ role: 'system', content: system }] : []), { role: 'user', content: prompt }], options: { num_ctx: ctxN(), num_predict: maxTokens, temperature: 0.2 } }) });
     if (!r.ok) throw new Error('Ollama 返回 ' + r.status);
     return (await r.json()).message.content || '';
   }
@@ -646,6 +651,8 @@ ${memory() ? `你记住的关于用户的事（来自 ${MEMF}）：\n${memory()}
     setMessages: (h) => { messages = [messages[0], ...h]; lastUsed = 0; },
     getMessages: () => messages,
     linkFixes,
+    setLean: (on) => { lean = !!on; lastUsed = 0; },
+    ctxMax: () => ctxN(),
   };
 }
 
