@@ -466,7 +466,7 @@ button,nav a,.cv,.sw,.ma,.send,.plus,.chip,.ghost{transition:background-color .1
 .send.ready{background:var(--accent);color:var(--accent-ink);opacity:1}
 .send.ready:hover{background:#fff}
 .send.stopmode{background:rgba(255,255,255,.16);color:#e5484d;opacity:1}
-.send.stopmode svg{opacity:.75}   /* 10-07 用户：停止键小方块和显卡数字变红时一样的暗红（同色 #e5484d、同 75% 透明度） */
+.send.stopmode svg{color:#b43e42;opacity:1}   /* 10-07 用户：停止键小方块和显卡数字变红时看着一样的暗红。显卡数字是 #e5484d×75% 叠在 #212121 上，实测屏幕上是 (180,62,66)=#b43e42；方块底下是浅灰按钮，再用半透明会透出灰变粉，所以直接用实测出来的实色 */
 .send:active{transform:scale(.92)}
 .ma:active,.cbox .cp:active,.sw:active,.chip:active{transform:scale(.96)}
 :focus-visible{outline:1px solid rgba(255,255,255,.5);outline-offset:1px}
