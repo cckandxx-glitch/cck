@@ -200,11 +200,11 @@ textarea{width:100%;padding:10px 12px;border:1px solid var(--line2);border-radiu
 #wk b{font-weight:400;font-variant-numeric:tabular-nums}
 #wk>span::selection{-webkit-text-fill-color:var(--ink)}   /* 文字本身是透明渐变，选中时显示成正常字色 */
 #wk>span{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}   /* 顺序：已 xx 秒 · 硬件数据 · 正在干什么。长短会变的文字放最后，怎么变都推不动前面的东西 */
-#wk em .bars{display:inline-flex;gap:3px;height:22px;padding:4px 1px;margin:-4px 0;vertical-align:-4px}   /* 10-07 用户要更简：「显卡93% 内存45%」换成两根小竖条（左显卡、右内存），一眼看高低；具体数字看鼠标提示 */
+#wk em .bars{display:inline-flex;gap:3px;height:21px;padding:4px 1px;margin:-4px 0}   /* 竖条 13px 高、和字的中线对齐（em 是 flex 居中，不靠 vertical-align 猜）。10-07 用户要更简：「显卡93% 内存45%」换成两根小竖条（左显卡、右内存），一眼看高低；具体数字看鼠标提示 */
 #wk em .bars>span{width:5px;border-radius:1.5px;background:var(--line2);display:flex;align-items:flex-end;overflow:hidden}
 #wk em .bars i{all:unset;display:block;width:100%;background:currentColor;transition:height .4s}
 #wk>b{flex:none;text-align:right}   /* 宽度由脚本按「已 999 秒」定好；靠右对齐，后面的点紧挨着秒数 */
-#wk em{flex:none;font-style:normal;font-variant-numeric:tabular-nums;white-space:nowrap;opacity:.75}
+#wk em{flex:none;display:inline-flex;align-items:center;font-style:normal;font-variant-numeric:tabular-nums;white-space:nowrap;opacity:.75}
 #wk:not(.idle) em:not(:empty){margin:0 -4px}
 #wk:not(.idle) em:not(:empty)::before{content:'·';margin-right:6px}
 #wk:not(.idle) em:not(:empty)::after{content:'·';margin-left:6px}   /* 点两边各约 6px */
