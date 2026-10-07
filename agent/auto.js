@@ -151,7 +151,7 @@ function create({ cfg, pw, getBusy, setBusy, notify, onEvent, notGameUrl }) {
   if (on) startWatch();
 
   return {
-    get: () => ({ on, active: S.active, game: S.game, title: S.title, why: S.why, offByAuto: S.offByAuto, err: S.err }),
+    get: () => ({ on, active: S.active, game: S.game, title: S.title, why: S.why, offByAuto: S.offByAuto, err: S.err, forced: S.userForcedOn }),
     set(v) { on = !!v; save(); if (on) startWatch(); else { stopWatch(); hist.clear(); Object.assign(S, { active: false, game: '', title: '', detSince: 0, missSince: 0, offByAuto: false, resume: false, pendingOff: false, pendingOn: false, userForcedOn: false, forceNext: false }); } onEvent('state', {}); },
     manual(action) {          // 用户手动下线：游戏期间 → 游戏结束后自动上线
       if (action !== 'off') return;

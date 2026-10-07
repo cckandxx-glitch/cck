@@ -1,6 +1,6 @@
 // REIZE助手 独立窗口版：自己起 ../agent/server.js，在无边框磨砂窗口里打开，不走浏览器。窗口关掉，服务一起停。
 // Electron 用 CRM 桌面版那份（启动脚本里指过去），这里不再重复装。
-const { app, BrowserWindow, Menu, shell, screen, ipcMain } = require('electron');
+const { app, BrowserWindow, Menu, shell, screen, ipcMain, dialog, powerSaveBlocker } = require('electron');
 const path = require('path'), fs = require('fs'), http = require('http'), { spawn } = require('child_process');
 
 const ROOT = path.join(__dirname, '..');
@@ -9,6 +9,15 @@ const cfg = (() => { try { return JSON.parse(fs.readFileSync(path.join(AGENT, 'c
 const PORT = cfg.port || 5200, BASE = `http://127.0.0.1:${PORT}`;
 const STATE = path.join(__dirname, 'state.json');
 let server = null, win = null;
+// 10-07 学习循环 24 小时不停：后台学习时会写 agent/learn.json。学习中不让电脑睡眠；关窗口前先问一句（关了学习会停，下次打开自动接着学）
+const LEARNF = path.join(AGENT, 'learn.json');
+const learning = () => fs.existsSync(LEARNF);
+let psb = -1, sessionEnding = false, closeOk = false;
+setInterval(() => {
+  const on = learning();
+  if (on && psb < 0) { psb = powerSaveBlocker.start('prevent-app-suspension'); bb('学习中，阻止电脑睡眠'); }
+  else if (!on && psb >= 0) { powerSaveBlocker.stop(psb); psb = -1; bb('学习停了，允许电脑睡眠'); }
+}, 10000).unref();
 // 10-05 黑匣子：窗口莫名关掉/重开查不到原因，开关窗的每一步都记一行
 const BB = path.join(ROOT, 'logs', 'blackbox.log');
 const bb = (...a) => { try { fs.appendFileSync(BB, new Date().toLocaleString('zh-CN', { hour12: false }) + ' [外壳 ' + process.pid + '] ' + a.join(' ') + '\n'); } catch {} };
@@ -68,12 +77,18 @@ async function createWindow() {
   const save = () => { if (win.isDestroyed()) return; const b = win.getNormalBounds(); try { fs.writeFileSync(STATE, JSON.stringify({ ...b, max: win.isMaximized() })); } catch {} };
   const sendMax = () => { if (!win.isDestroyed()) win.webContents.send('win-max', win.isMaximized()); };
   win.on('maximize', sendMax); win.on('unmaximize', sendMax); win.webContents.on('did-finish-load', sendMax);
+  win.on('close', (e) => {
+    if (closeOk || sessionEnding || !learning()) return;
+    const r = dialog.showMessageBoxSync(win, { type: 'question', title: 'REIZE助手', message: 'AI 正在学习循环。', detail: '关掉窗口学习会停下（下次打开助手会自动接着学）。\n想让它一直学，请选「最小化，接着学」。', buttons: ['最小化，接着学', '仍然关闭'], defaultId: 0, cancelId: 0, noLink: true });
+    if (r === 0) { e.preventDefault(); win.minimize(); bb('学习中点了关闭，改为最小化'); }
+    else closeOk = true;
+  });
   win.on('close', save); win.on('close', () => bb('窗口 close 事件'));
   win.webContents.on('render-process-gone', (e, d) => bb('页面进程没了', JSON.stringify(d)));
   win.webContents.on('unresponsive', () => bb('页面无响应')); win.webContents.on('responsive', () => bb('页面恢复响应'));
   win.webContents.on('did-fail-load', (e, c, d) => bb('页面加载失败', c, d));
   win.webContents.on('did-start-loading', () => bb('页面开始加载(刷新)'));
-  app.on('session-end', () => bb('Windows 注销/关机'));
+  app.on('session-end', () => { sessionEnding = true; bb('Windows 注销/关机'); });
   win.on('closed', () => { win = null; });
   await win.loadURL(`${BASE}/?t=${token()}`);
 }
