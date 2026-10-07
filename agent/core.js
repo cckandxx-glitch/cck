@@ -598,6 +598,9 @@ ${learnTodo()}
 
   // 学习汇报上屏只留一行、最多 80 字（10-07 用户嫌啰嗦）；完整的那段仍留给下一轮当进度参考
   const shortReport = (t) => { const l = String(t).trim().split('\n').map((x) => x.trim()).filter(Boolean)[0] || ''; return l.length > 80 ? l.slice(0, 80) + '…' : l; };
+  // 每行汇报前面加「第几轮 几点几分｜」，一眼看出是哪一轮、什么时候学的（10-07 用户）
+  const hm = () => { const d = new Date(); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
+  const reportLine = (t, opts) => (opts.round ? `第 ${opts.round} 轮 ${hm()}｜` : '') + shortReport(t);
   let quietTok = false, quietAt = 0;   // 学习时：中间步骤（带工具调用的）说的话不上屏，只显示最后那行汇报（10-07：模型老在调用工具前说 "Let me write…"）
   async function chatOnce(extraOpts, noTools) {
     abortCtl = new AbortController();
@@ -698,7 +701,7 @@ ${learnTodo()}
         if (stats && stats.prompt_eval_count) lastUsed = stats.prompt_eval_count + (stats.eval_count || 0);
         messages.push({ role: 'assistant', content, ...(calls.length && !denied ? { tool_calls: calls } : {}) });
         log('assistant', { text: content, calls: calls.map((c) => c.function) });
-        if (quietTok && content.trim() && !(calls.length && !denied)) emit('token', { text: shortReport(content) });   // 学习：没有工具调用的这条才是汇报，补上屏
+        if (quietTok && content.trim() && !(calls.length && !denied)) emit('token', { text: reportLine(content, opts) });   // 学习：没有工具调用的这条才是汇报，补上屏
         if (content) lastText = content;
         if (denied || !calls.length) { if (!opts.sub) lastText = applyLinkFixes(lastText); emit('done', { stats: stats ? { n: stats.eval_count, tps: stats.eval_count / (stats.eval_duration / 1e9) } : null }); return lastText; }
         // 这一步有好几个要确认的操作：合成一个确认框一次问完，不再一个个弹
@@ -742,7 +745,7 @@ ${learnTodo()}
         messages.push({ role: 'user', content: '（本轮步数用完了。不要再调用工具，只写一行（不超过 60 字），格式：学了 XX；存进 XX；下一轮 XX。）' });
         const { content } = await chatOnce(undefined, true);
         messages.push({ role: 'assistant', content });
-        if (content.trim()) emit('token', { text: shortReport(content) });
+        if (content.trim()) emit('token', { text: reportLine(content, opts) });
         emit('done', { stats: null }); return content;
       }
     } catch (e) {

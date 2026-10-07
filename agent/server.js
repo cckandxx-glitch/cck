@@ -363,12 +363,12 @@ async function runLearnLoop(firstText) {
         let overtime = false;
         const roundT = setTimeout(() => { if (learn.on && busy === '学习循环' && !learn.yielding) { overtime = true; learn.yielding = '本轮超时'; bbS('学习第', learn.round, '轮超过', cfg.learnRoundMin || 15, '分钟，收掉开下一轮'); core.stop(); } }, (cfg.learnRoundMin || 15) * 60000);
         let said = false;
-        try { const r = await core.turn(prompt, { loop: true }); if (!overtime && r && r.trim()) { report = r.trim(); said = true; } fails = 0; } catch (e) { if (e.name !== 'StopError') { failed = true; fails++; learn.lastErr = e.message; } }
+        try { const r = await core.turn(prompt, { loop: true, round: learn.round }); if (!overtime && r && r.trim()) { report = r.trim(); said = true; } fails = 0; } catch (e) { if (e.name !== 'StopError') { failed = true; fails++; learn.lastErr = e.message; } }
         finally { clearTimeout(roundT); }
         if (overtime) learn.yielding = false;
         if (!said && !failed && learn.on && !learn.inbox.length && (overtime || !learn.yielding)) {   // 这一轮没写出汇报：替它简短交代一句，让用户知道它在正常干活
           const q = [...learn.did.q].slice(0, 3), f = [...learn.did.f].slice(0, 3);
-          notice(`学习第 ${learn.round} 轮` + (overtime ? '（超时收尾）' : '') + '：' + (q.length ? '查了「' + q.join('」「') + '」' : '没查到新资料') + (f.length ? '；存进 ' + f.join('、') : '；没存笔记'));
+          notice(`第 ${learn.round} 轮 ${new Date().toTimeString().slice(0, 5)}｜` + (overtime ? '（超时收尾）' : '') + (q.length ? '查了「' + q.join('」「') + '」' : '没查到新资料') + (f.length ? '；存进 ' + f.join('、') : '；没存笔记'));
         }
         if (!learn.on) break;
         if (learn.inbox.length || learn.yielding) { learn.yielding = false; continue; }   // 被用户插话 / 游戏打断的这一轮不算出错，先去处理
