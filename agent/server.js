@@ -505,8 +505,8 @@ const server = http.createServer(async (req, res) => {
       }
       if (url.pathname === '/api/conv/new' || url.pathname === '/api/conv/open' || url.pathname === '/api/conv/delete') {
         const act = url.pathname.split('/').pop(), id = String(b.id || '');
-        // 删的是别的对话（不是正在干活的这个）只动磁盘文件，不碰当前会话，忙的时候也放行
-        if (busy && !(act === 'delete' && cur && cur.id !== id)) return json(res, 409, { error: busyMsg(act === 'delete' ? '删除这个对话' : act === 'new' ? '新建对话' : '切换到别的对话') });
+        // 删的是别的对话（不是正在干活的这个）只动磁盘文件，不碰当前会话，忙的时候也放行；「打开」的就是当前对话等于什么都不做，也放行
+        if (busy && !(act === 'delete' && cur && cur.id !== id) && !(act === 'open' && cur && cur.id === id)) return json(res, 409, { error: busyMsg(act === 'delete' ? '删除这个对话' : act === 'new' ? '新建对话' : '切换到别的对话') });
         if (act === 'new') { persist(); newConv(); }
         else if (!/^c\d+$/.test(id) || (!convs.has(id) && !(cur && cur.id === id))) return json(res, 404, { error: '没有这个对话' });
         else if (act === 'open') { if (cur.id !== id) openConv(id); }
