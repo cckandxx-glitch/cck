@@ -46,7 +46,7 @@ const RESUMEF = path.join(__dirname, 'learn-resume.json');
 const setResumable = (v) => { learn.resumable = !!v; try { if (v) fs.writeFileSync(RESUMEF, '{"resumable":true}'); else if (fs.existsSync(RESUMEF)) fs.unlinkSync(RESUMEF); } catch (e) {} };
 learn.resumable = fs.existsSync(RESUMEF);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const LEARN_PROMPT = () => '（学习第 ' + learn.round + ' 轮：按自学计划学 1~2 个主题，存进知识库。最后只写一行（不超过 60 字），格式：学了 XX；存进 XX；下一轮 XX。）';
+const LEARN_PROMPT = () => '（学习第 ' + learn.round + ' 轮：按系统提示里这一轮的任务查资料，存进知识库。最后只写一行（不超过 60 字），格式：学了 XX；存进 XX；下一轮 XX。）';
 function stopLearn(reason) {
   if (!learn.on) return;
   bbS('停止学习：', reason, '第', learn.round, '轮');
@@ -164,6 +164,8 @@ function onEvent(type, d) {
     if (d.name === 'web_search' && a.query) learn.did.q.add(String(a.query).slice(0, 30));
     if ((d.name === 'write_file' || d.name === 'edit_file') && a.path) learn.did.f.add(path.basename(String(a.path)));
   }
+  // 10-08：记下这一轮联网查资料成没成，断网时不让一轮轮空转、也不把主题误判成「查不出新东西」
+  if (type === 'toolresult' && learn.on && busy === '学习循环' && learn.did && (d.name === 'web_search' || d.name === 'fetch_url')) { if (/^错误/.test(String(d.text || ''))) learn.did.netErr++; else learn.did.netOk++; }
   if (type === 'fixlinks') { const ai = [...tr].reverse().find((x) => x.role === 'ai'); if (ai) for (const [a, b] of d.pairs || []) ai.text = ai.text.split(a).join(b); return; }
   if (type === 'dropped') { droppedUsers -= d.users || 0; return; }   // 核心为腾上下文丢掉了模型记忆里最早的几轮：界面第 i 条用户消息对应模型里第 i-N 条，所以减
   if (type === 'token') {
@@ -328,6 +330,8 @@ async function runLearnLoop(firstText) {
   const gameOn = () => { const a = auto.get(); return a.active && !a.forced; };
   const gameWatch = setInterval(() => { if (learn.on && busy === '学习循环' && !learn.yielding && gameOn()) { learn.yielding = '检测到游戏在运行，学习这一轮先停下，让出显存。'; bbS('学习第', learn.round, '轮让路给游戏', auto.get().game); core.stop(); } }, 3000);
   const pause = async (ms) => { for (let i = 0; i < ms / 100 && learn.on && !learn.inbox.length && !learn.yielding; i++) await sleep(100); };
+  learn.netFail = 0;
+  if (!cfg.online) notice('提醒：「联网」开关关着，学习查不了网上资料，只能整理已有的文件。要学新东西请打开联网。');
   core.setLean(true);   // 学习用小上下文 + 狠压缩，给显卡减负（换上下文大小时 Ollama 会重新载入一次模型，约 7 秒）
   try {
     if (core.ctxUsed() > core.ctxMax() * 0.5) { try { await core.compactNow(); } catch (e) {} }   // 开学前的聊天记录可能比学习用的小上下文还长：先压掉，别让第一轮就被 Ollama 截断
@@ -362,7 +366,8 @@ async function runLearnLoop(firstText) {
         if (st.state === 'down') await ensureOllama();
         else if (st.state === 'off') bootNotice();
 
-        learn.round++; learn.step = 0; learn.did = { q: new Set(), f: new Set() }; saveLearn(true);
+        learn.round++; learn.step = 0; learn.did = { q: new Set(), f: new Set(), netErr: 0, netOk: 0 }; saveLearn(true);
+        core.learnBegin();   // 10-08：这一轮学哪个主题（或复查哪篇笔记）由程序定，写进系统提示
         busySince = Date.now(); bc('state', {});   // 计时按每一轮算，不再从开始学习一直累加
         core.resetStop();
         // 上一轮出错（多半是一次写太长超时）：提醒它分段写，不然下一轮照样写同一大段、照样超时，一直原地重来（10-07 写英文话术那轮）
@@ -382,6 +387,12 @@ async function runLearnLoop(firstText) {
         try { const r = await core.turn(prompt, { loop: true, round: learn.round }); if (!overtime && r && r.trim()) { said = true; report = [...learn.did.f].some((x) => x !== '行业自学计划.md') ? r.trim() : ''; } fails = 0; } catch (e) { if (e.name !== 'StopError') { failed = true; fails++; learn.lastErr = e.message; } }
         finally { clearTimeout(roundT); }
         if (overtime) learn.yielding = false;
+        const netDown = learn.did.netErr > 0 && !learn.did.netOk;   // 这一轮查资料全失败（多半断网 / 搜索挂了）
+        learn.netFail = netDown ? (learn.netFail || 0) + 1 : learn.did.netOk ? 0 : (learn.netFail || 0);
+        if ((said || overtime) && !netDown) {   // 正常学完的一轮才记进度、判主题学没学完；断网那轮不算（不然会被误判成「查不出新东西」收掉）
+          let e = null; try { e = core.learnEnd(); } catch (er) { bbS('记学习进度出错', er); }
+          if (e && e.fin) notice(`「${e.key}」学完了：${e.fin}（共 ${e.rounds} 轮${e.outline.n ? `，提纲 ${e.outline.done}/${e.outline.n}` : ''}）。`);
+        }
         bbS('学习第', learn.round, '轮结束：', said ? '有汇报' : failed ? '出错 ' + learn.lastErr : overtime ? '超时' : learn.yielding ? '被打断（' + (learn.inbox.length ? '用户插话' : learn.yielding) + '）' : '没写汇报');
         if (!said && !failed && learn.on && !learn.inbox.length && (overtime || !learn.yielding)) {   // 这一轮没写出汇报：替它简短交代一句，让用户知道它在正常干活
           const q = [...learn.did.q].slice(0, 3), f = [...learn.did.f].slice(0, 3);
@@ -403,6 +414,11 @@ async function runLearnLoop(firstText) {
           waitMs = Math.min(300000, 30000 * Math.max(1, fails));   // 等一会再试，给 Ollama 恢复的时间，别一出错就连环重试
           // 出错重来时界面那行要说清楚，别让人以为卡住了（10-07 用户：学到写英文话术那轮就"停住了"）
           wkLabel = `第 ${learn.round} 轮没做完（${String(learn.lastErr || '出错').slice(0, 30)}），${Math.round(waitMs / 1000)} 秒后重来`; bc('wk', { label: wkLabel });
+        }
+        else if (learn.netFail >= 3) {   // 连着 3 轮联网查资料全失败：别一轮轮空转，10 分钟后再试
+          if (learn.netFail === 3) notice('学习连续 3 轮联网查资料都失败（可能断网了），先每 10 分钟试一次，网好了自动接着学。');
+          waitMs = 600000;
+          wkLabel = `联网查资料连续 ${learn.netFail} 轮失败，10 分钟后再试`; bc('wk', { label: wkLabel });
         }
         persist();
         await pause(waitMs);

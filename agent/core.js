@@ -480,21 +480,81 @@ ${memory() ? `你记住的关于用户的事（来自 ${MEMF}）：\n${memory()}
   // 学习时每轮直接把「计划里还没学完的主题」和「知识库已有笔记」摆给模型（10-07：计划文件 9000 多字，学习模式一次只给读 2000 字，
   // 模型看不到后面，已经学过的主题又重学一遍，没学完的也不会回头补）
   const PLANF = () => path.join(WS, '指南库', '行业自学计划.md');
-  const learnTodo = () => {
-    let plan = ''; try { plan = readTextAuto(PLANF()); } catch (e) { return '（没找到自学计划文件）'; }
-    const ls = plan.split(/\r?\n/).filter((l) => /^\s*- \[[ ~]\]/.test(l));
-    const part = ls.filter((l) => /\[~\]/.test(l)), todo = ls.filter((l) => /\[ \]/.test(l));
-    const t = [...part, ...todo].join('\n');
-    return t ? (t.length > 1500 ? t.slice(0, 1500) + '\n…' : t) : '（计划里的主题都学完了：自己想 1~2 个值得学的新主题，先加进计划的「待研究」再学）';
+  // 10-08 用户定的「学完」标准（以前全靠模型自己标 [x]，结果几百个主题大多没写完）：
+  //   开新主题先在笔记开头列「## 提纲」4~6 个必须回答的问题，答完一条打一个勾；满足任意一条就算学完，由程序改计划里那一行：
+  //   ① 提纲（至少 4 条）全打勾；② 连续 2 轮笔记没长出新内容（查不出新东西了）；③ 一个主题学满 6 轮（写明还缺什么，复查时再补）
+  //   同时没学完的主题最多 3 个，到上限不往「待研究」加新主题；计划全学完了就轮流复查旧笔记（挑最久没复查的）
+  //   每个主题学了几轮、连着几轮没新东西、笔记是哪几篇，记在知识库的 .学习进度.json
+  const LIM = () => cfg.learnMaxOpen || 3, MAXR = () => cfg.learnTopicRounds || 6, DRY = () => cfg.learnDryRounds || 2;
+  const LSTF = () => path.join(cfg.kbDir, '.学习进度.json');
+  const lst = () => { try { const o = JSON.parse(fs.readFileSync(LSTF(), 'utf8')); return { topics: o.topics || {}, review: o.review || {} }; } catch (e) { return { topics: {}, review: {} }; } };
+  const lstSave = (o) => { try { fs.writeFileSync(LSTF() + '.tmp', JSON.stringify(o, null, 1)); fs.renameSync(LSTF() + '.tmp', LSTF()); } catch (e) { log('learn_state_fail', { err: e.message }); } };
+  const MARK = /^\s*- \[([ ~xX])\]/;
+  const topicKey = (l) => l.replace(/^\s*- \[[ ~xX]\]\s*/, '').replace(/^(\d{4}[-/.])?\d{1,2}[-/.]\d{1,2}\s*/, '').replace(/\*\*/g, '').split(/[（(→：:]/)[0].trim().slice(0, 40);
+  const kbFiles = () => { try { return fs.readdirSync(cfg.kbDir).filter((f) => !f.startsWith('.') && /\.(md|txt)$/i.test(f)); } catch (e) { return []; } };
+  const kbSizes = () => { const o = {}; for (const f of kbFiles()) { try { o[f] = fs.statSync(path.join(cfg.kbDir, f)).size; } catch (e) {} } return o; };
+  const outline = (notes) => {   // 数笔记里「## 提纲」下面打了几个勾
+    let n = 0, done = 0; const open = [];
+    for (const f of notes) {
+      let t = ''; try { t = readTextAuto(path.join(cfg.kbDir, f)); } catch (e) { continue; }
+      const m = /^#+\s*提纲.*$/m.exec(t); if (!m) continue;
+      for (const l of t.slice(m.index + m[0].length).split(/\r?\n#+\s/)[0].split(/\r?\n/)) { const c = /^\s*- \[([ xX~])\]\s*(.*)/.exec(l); if (!c) continue; n++; if (/[xX]/.test(c[1])) done++; else open.push(c[2].trim().slice(0, 20)); }
+    }
+    return { n, done, open };
   };
-  // 10-08：学习时模型整轮只读计划文件「定位进度」、不查资料（连着 20 多轮）。读计划文件只给它没学完的条目，第一条直接点名让它学
+  const planStat = (ls) => ({ part: ls.filter((l) => /^\s*- \[~\]/.test(l)), todo: ls.filter((l) => /^\s*- \[ \]/.test(l)), done: ls.filter((l) => /^\s*- \[[xX]\]/.test(l)).length });
+  let cur = null;   // 这一轮学什么：每轮开始时由学习循环定下来（learnBegin），一轮里不变
+  const learnBegin = () => {
+    let ls; try { ls = readTextAuto(PLANF()).split(/\r?\n/); } catch (e) { cur = { kind: 'noplan' }; return cur; }
+    const p = planStat(ls), st = lst(), sizes = kbSizes();
+    const l = p.part[0] || p.todo[0];   // 没学完的 [~] 先补，补完才开新的 [ ]
+    if (l) { const key = topicKey(l); cur = { kind: 'topic', key, line: l.trim().slice(0, 200), tp: st.topics[key] || { rounds: 0, dry: 0, notes: [] }, sizes, p }; return cur; }
+    const f = Object.keys(sizes).sort((a, b) => (st.review[a] || 0) - (st.review[b] || 0))[0];
+    if (!f) { cur = { kind: 'empty', p }; return cur; }
+    st.review[f] = Date.now(); lstSave(st);
+    cur = { kind: 'review', note: f, sizes, p }; return cur;
+  };
+  const setPlanLine = (key, make) => {   // 找到计划里这个主题那一行，按 make 改写
+    let raw; try { raw = readTextAuto(PLANF()); } catch (e) { return false; }
+    const ls = raw.split(/\r?\n/), i = ls.findIndex((l) => MARK.test(l) && topicKey(l) === key);
+    if (i < 0) return false;
+    const nl = make(ls[i]); if (nl === ls[i]) return true;
+    ls[i] = nl;
+    try { fs.writeFileSync(PLANF() + '.tmp', ls.join(raw.includes('\r\n') ? '\r\n' : '\n')); fs.renameSync(PLANF() + '.tmp', PLANF()); return true; } catch (e) { log('plan_write_fail', { err: e.message }); return false; }
+  };
+  // 一轮正常结束（有汇报 / 超时收尾）后调：记轮数、看笔记长没长、按标准判学没学完，改计划那一行
+  const learnEnd = () => {
+    const c = cur; cur = null;
+    if (!c || c.kind !== 'topic') return null;
+    const now = kbSizes(); let grow = 0; const st = lst(); const tp = st.topics[c.key] || c.tp;
+    for (const f in now) { const d = now[f] - (c.sizes[f] || 0); if (d > 0) { grow += d; if (!tp.notes.includes(f)) tp.notes.push(f); } }
+    tp.rounds++; tp.dry = grow < 600 ? tp.dry + 1 : 0;   // 600 字节 ≈ 200 个汉字：这一轮笔记长了不到这些，算没学出新东西
+    const o = outline(tp.notes);
+    const fin = o.n >= 4 && o.done === o.n ? `提纲 ${o.n} 条全写完` : tp.dry >= DRY() ? (tp.notes.length ? `连续 ${DRY()} 轮查不出新东西` : `连续 ${DRY()} 轮没写出内容，先放下`) : tp.rounds >= MAXR() ? `学满 ${MAXR()} 轮` + (o.open.length ? `，还缺：${o.open.slice(0, 3).join('、')}` : '') : '';
+    const day = new Date().toLocaleDateString('sv-SE'), notes = tp.notes.length ? ' → 知识库《' + tp.notes.map((f) => f.replace(/\.(md|txt)$/i, '')).join('》《') + '》' : '';
+    setPlanLine(c.key, (l) => fin ? `- [x] ${day} ${c.key}${notes}（${fin}）` : l.replace(/- \[[ xX~]\]/, '- [~]'));   // 模型提前标了 [x] 但没达标：退回 [~]
+    if (fin) { tp.fin = day; } st.topics[c.key] = tp; lstSave(st);
+    log('learn_end', { key: c.key, rounds: tp.rounds, dry: tp.dry, grow, outline: o, fin });
+    return { key: c.key, fin, rounds: tp.rounds, outline: o };
+  };
+  const learnTask = () => {
+    const c = cur || learnBegin();
+    const pr = c.p ? `（计划进度：学完 ${c.p.done} 个，没学完 ${c.p.part.length} 个，没开始 ${c.p.todo.length} 个）\n` : '';
+    if (c.kind === 'noplan' || c.kind === 'empty') return pr + `计划里没有要学的主题、知识库也没有笔记：自己想 2~3 个和用户业务有关、值得学的主题，${c.kind === 'noplan' ? `用 write_file 建计划文件 ${PLANF()}` : '用 edit_file 加进计划的「待研究」'}，每个一行「- [ ] 主题」，下一轮开始学。`;
+    if (c.kind === 'review') return pr + `计划里的主题都学完了，这一轮复查旧笔记《${c.note}》：先 read_file 读它（长的分段读）；开头没有「## 提纲」就先补一个（4~6 个这个主题必须回答的问题，已经写到的打勾）；再找出缺的、过时的、没出处的、可能写错的，用 web_search 查证后 edit_file 补进去或改正，不要重写整篇。笔记超过 8000 字的，新内容另存为《原名（续）》。`;
+    const t = c.tp, notes = t.notes.length ? '《' + t.notes.join('》《') + '》' : '';
+    return pr + `这一轮只学这个主题：「${c.key}」（计划原文：${c.line}）。已学 ${t.rounds} 轮，最多 ${MAXR()} 轮。\n` +
+      (notes ? `它的笔记是 ${notes}：先 read_file 看笔记开头的「## 提纲」（没有就先补上），挑没打勾的 1~2 个问题查资料写答案，写完把那条改成「- [x] 问题」。`
+        : `先在知识库新建笔记（文件名就用主题名.md；已有同主题的笔记就用那篇），开头写「## 提纲」，列 4~6 个这个主题必须回答的问题，每条一行「- [ ] 问题」；然后挑 1~2 个查资料写答案，写完把那条改成「- [x] 问题」。`) +
+      `每个打勾的问题都要写成能照着做的内容，带至少 1 个出处链接。确实查不出新东西了，汇报里写「没新内容」。`;
+  };
+  // 10-08：学习时模型整轮只读计划文件「定位进度」、不查资料（连着 20 多轮）。读计划文件不给原文，只给这一轮的任务
   const isPlanF = (p) => { try { return path.resolve(abs(p)).toLowerCase() === path.resolve(PLANF()).toLowerCase(); } catch (e) { return false; } };
-  const nextTopic = () => { const l = learnTodo().split('\n')[0] || ''; return /^\s*- \[/.test(l) ? l.replace(/^\s*- \[[ ~]\]\s*/, '').slice(0, 120) : ''; };
+  const nextTopic = () => { const c = cur; return !c ? '' : c.kind === 'topic' ? c.key : c.kind === 'review' ? `复查笔记《${c.note}》` : ''; };
   const kbNotes = () => { try { const t = fs.readdirSync(cfg.kbDir).filter((f) => !f.startsWith('.')).join('、'); return t.length > 1500 ? t.slice(0, 1500) + '…' : t || '（空）'; } catch (e) { return '（读不到）'; } };
   const LEARN_SYSTEM = () => `你是 REIZE助手，正在自学：按 ${PLANF()} 的清单查资料，整理成笔记存进知识库 ${cfg.kbDir}。
 现在是 ${new Date().toLocaleString('zh-CN', { hour12: false })}。电脑：Windows。工作文件夹是 ${WS}（相对路径从这里算起）。
-${memory() ? `记住的关于用户的事：\n${memory()}\n` : ''}计划里还没学完的主题（[~] 是上次没学完的，优先接着补；[ ] 是还没开始的）：
-${learnTodo()}
+${memory() ? `记住的关于用户的事：\n${memory()}\n` : ''}${learnTask()}
 知识库里已有的笔记：${kbNotes()}
 规则：
 1. 事实一律用工具查（web_search / fetch_url / kb_search / 读文件），笔记里写上出处；查不到就写查不到，不要编。
@@ -502,9 +562,9 @@ ${learnTodo()}
 3. 链接从工具结果里原样照抄，不许改写。
 4. 你的记忆每轮都会清空、轮内也会不断压缩，只有写进文件的才留得下：学到一点就及时用 write_file / edit_file 存进去，别攒着。
 5. 一律用中文（要学的就是英文话术、英文文案的，内容本身用英文）。调用工具时不要说话；整轮只在最后写一行汇报（不超过 60 字，格式：学了 XX；存进 XX；下一轮 XX），别的什么都不说，不要解释过程。每轮至少要存进一点新内容，别整轮只核对清单。
-6. 主题已经有笔记的（看上面的列表），就用 edit_file 在原笔记里补充新内容，不要另建一份重复的，也不要重写已有内容。
+6. 主题已经有笔记的（看上面的列表），就用 edit_file 在原笔记里补充新内容，不要另建一份重复的，也不要重写已有内容。一篇笔记超过 8000 字就把新内容拆成子笔记（如《主题（下）》），太长了以后读不完。
 7. 每次 write_file / edit_file 写的内容不超过 1500 字；长的分几次写，后面的用 write_file 加 append=true 接在末尾（一次写太长会超时，这一轮白干）。
-7. 一轮结束时更新计划文件：学完的主题改成「- [x] 日期 主题 → 知识库《笔记名》」；没学完的改成「- [~] 主题（未完：还缺 …）」，下一轮接着补；学习中发现值得学的新主题，加进「待研究」。`;
+8. 计划文件里各主题的 [ ] [~] [x] 由程序按提纲自动改，你不用改，也不要往计划里写进度记录。学习中发现值得学的新主题，计划里没学完的不到 ${LIM()} 个时，可以用 edit_file 在「待研究」下加一行「- [ ] 主题」。`;
   const LEARN_TOOLS = new Set(['list_dir', 'read_file', 'find_files', 'write_file', 'edit_file', 'kb_search', 'web_search', 'fetch_url']);   // 学习只给这几个工具，其余（桌面、画图、CRM、命令……）的说明不发，省上下文
   // 2026-10-07 用户要求：模型说的话越少越好；几个要确认的操作合成一次确认
   const BRIEF = `
@@ -785,7 +845,8 @@ ${learnTodo()}
             if (!ext && !IMPL[name]) throw new Error('没有这个工具: ' + name);
             if (lean && !LEARN_TOOLS.has(name)) throw new Error('学习时不能用 ' + name + '，只用查资料和读写笔记的工具');   // 模型照着旧聊天记录调 CRM 之类的工具：学习时不执行
             if ((name === 'web_search' || name === 'fetch_url') && !cfg.online) throw new Error('联网开关是关的');
-            if (lean && opts.loop && name === 'read_file' && args && isPlanF(args.path)) result = `（计划文件很长，学习时只给你没学完的条目；要改哪条就用 edit_file 原样照抄那一行。别再读它，直接查资料。）\n${learnTodo()}\n这一轮就学：${nextTopic() || '自己定一个新主题'}`;
+            if (lean && opts.loop && name === 'read_file' && args && isPlanF(args.path) && fs.existsSync(PLANF())) result = `（计划文件很长，学习时不给原文；进度由程序记，你只管这一轮的任务，别再读它，直接查资料。）\n${learnTask()}`;
+            else if (lean && opts.loop && name === 'write_file' && args && isPlanF(args.path) && fs.existsSync(PLANF())) result = '错误: 计划文件不许整份覆盖或追加（你只看到了一部分，覆盖会把别的主题弄丢；进度也不用往里写）。要加新主题就用 edit_file 在「待研究」下加一行。';   // 10-08：只给模型看部分计划，它整份重写会把计划弄丢
             else if (batch && batch.has(c) && !batchOk) result = '用户拒绝了这一批操作。';
             else { preOk = !!(batch && batch.has(c)); try { result = ext ? await ext.run(args || {}) : await IMPL[name](args || {}); } finally { preOk = false; } }
           } catch (e) { if (e.name === 'StopError') throw e; result = '错误: ' + e.message; }
@@ -846,6 +907,7 @@ ${learnTodo()}
     getMessages: () => messages,
     linkFixes,
     setLean: (on) => { lean = !!on; lastUsed = 0; },
+    learnBegin, learnEnd,
     ctxMax: () => ctxN(),
   };
 }
