@@ -484,9 +484,9 @@ ${memory() ? `你记住的关于用户的事（来自 ${MEMF}）：\n${memory()}
   //   开新主题先在笔记开头列「## 提纲」4~6 个必须回答的问题，答完一条打一个勾；满足任意一条就算学完，由程序改计划里那一行：
   //   ① 提纲（至少 4 条）全打勾；② 连续 2 轮笔记没长出新内容（查不出新东西了）；③ 一个主题学满 6 轮（写明还缺什么，复查时再补）
   //   同时没学完的主题最多 3 个，到上限不往「待研究」加新主题；计划全学完了就轮流复查旧笔记（挑最久没复查的）
-  //   每个主题学了几轮、连着几轮没新东西、笔记是哪几篇，记在知识库的 .学习进度.json
+  //   每个主题学了几轮、连着几轮没新东西、笔记是哪几篇，记在指南库的 .学习进度.json（和计划文件放一起）
   const LIM = () => cfg.learnMaxOpen || 3, MAXR = () => cfg.learnTopicRounds || 6, DRY = () => cfg.learnDryRounds || 2;
-  const LSTF = () => path.join(cfg.kbDir, '.学习进度.json');
+  const LSTF = () => path.join(WS, '指南库', '.学习进度.json');   // 不放知识库里：放那儿会被 kb_search 当资料搜出来
   const lst = () => { try { const o = JSON.parse(fs.readFileSync(LSTF(), 'utf8')); return { topics: o.topics || {}, review: o.review || {} }; } catch (e) { return { topics: {}, review: {} }; } };
   const lstSave = (o) => { try { fs.writeFileSync(LSTF() + '.tmp', JSON.stringify(o, null, 1)); fs.renameSync(LSTF() + '.tmp', LSTF()); } catch (e) { log('learn_state_fail', { err: e.message }); } };
   const MARK = /^\s*- \[([ ~xX])\]/;
