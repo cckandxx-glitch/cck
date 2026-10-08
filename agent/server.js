@@ -378,8 +378,8 @@ async function runLearnLoop(firstText) {
         // 一轮最多 15 分钟（config 里 learnRoundMin 可改）：到点就收掉这一轮直接开下一轮，进度都在自学计划和知识库里，不会丢
         let overtime = false;
         const roundT = setTimeout(() => { if (learn.on && busy === '学习循环' && !learn.yielding) { overtime = true; learn.yielding = '本轮超时'; bbS('学习第', learn.round, '轮超过', cfg.learnRoundMin || 15, '分钟，收掉开下一轮'); core.stop(); } }, (cfg.learnRoundMin || 15) * 60000);
-        let said = false;
-        try { const r = await core.turn(prompt, { loop: true, round: learn.round }); if (!overtime && r && r.trim()) { report = r.trim(); said = true; } fails = 0; } catch (e) { if (e.name !== 'StopError') { failed = true; fails++; learn.lastErr = e.message; } }
+        let said = false;   // 10-08：没存笔记的那轮汇报（「下一轮接着学第 N 轮主题」）不带进下一轮，免得一轮轮照抄、原地打转
+        try { const r = await core.turn(prompt, { loop: true, round: learn.round }); if (!overtime && r && r.trim()) { said = true; report = [...learn.did.f].some((x) => x !== '行业自学计划.md') ? r.trim() : ''; } fails = 0; } catch (e) { if (e.name !== 'StopError') { failed = true; fails++; learn.lastErr = e.message; } }
         finally { clearTimeout(roundT); }
         if (overtime) learn.yielding = false;
         bbS('学习第', learn.round, '轮结束：', said ? '有汇报' : failed ? '出错 ' + learn.lastErr : overtime ? '超时' : learn.yielding ? '被打断（' + (learn.inbox.length ? '用户插话' : learn.yielding) + '）' : '没写汇报');

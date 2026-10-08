@@ -487,6 +487,9 @@ ${memory() ? `你记住的关于用户的事（来自 ${MEMF}）：\n${memory()}
     const t = [...part, ...todo].join('\n');
     return t ? (t.length > 1500 ? t.slice(0, 1500) + '\n…' : t) : '（计划里的主题都学完了：自己想 1~2 个值得学的新主题，先加进计划的「待研究」再学）';
   };
+  // 10-08：学习时模型整轮只读计划文件「定位进度」、不查资料（连着 20 多轮）。读计划文件只给它没学完的条目，第一条直接点名让它学
+  const isPlanF = (p) => { try { return path.resolve(abs(p)).toLowerCase() === path.resolve(PLANF()).toLowerCase(); } catch (e) { return false; } };
+  const nextTopic = () => { const l = learnTodo().split('\n')[0] || ''; return /^\s*- \[/.test(l) ? l.replace(/^\s*- \[[ ~]\]\s*/, '').slice(0, 120) : ''; };
   const kbNotes = () => { try { const t = fs.readdirSync(cfg.kbDir).filter((f) => !f.startsWith('.')).join('、'); return t.length > 1500 ? t.slice(0, 1500) + '…' : t || '（空）'; } catch (e) { return '（读不到）'; } };
   const LEARN_SYSTEM = () => `你是 REIZE助手，正在自学：按 ${PLANF()} 的清单查资料，整理成笔记存进知识库 ${cfg.kbDir}。
 现在是 ${new Date().toLocaleString('zh-CN', { hour12: false })}。电脑：Windows。工作文件夹是 ${WS}（相对路径从这里算起）。
@@ -732,7 +735,7 @@ ${learnTodo()}
     const copyHint = !opts.sub && WANT_COPY.test(String(userText)) ? '\n\n（系统提示：如果这是要写一段成稿给用户复制到别处用，请把成稿整段放进一个三反引号代码块里，块外最多一两句说明。）' : '';
     const userMsg = { role: 'user', content: userText + copyHint, ...(opts.images ? { images: opts.images } : {}) };
     messages.push(userMsg); log('user', { text: userText });
-    let lastText = '', denied = false;
+    let lastText = '', denied = false, savedKb = false, nudged = 0;   // savedKb：这一轮往计划文件以外的地方存进了笔记
     try {
       const stepCap = opts.loop ? cfg.learnSteps || 40 : cfg.maxSteps;   // 学习一轮最多 40 步就收尾进下一轮，别一轮跑几百步、反复压缩（10-07）
       for (let step = 0; step < stepCap; step++) {
@@ -756,6 +759,13 @@ ${learnTodo()}
         lastUsed = (stats && stats.prompt_eval_count ? stats.prompt_eval_count + (stats.eval_count || 0) : 0);
         messages.push({ role: 'assistant', content, ...(calls.length && !denied ? { tool_calls: calls } : {}) });
         log('assistant', { text: content, calls: calls.map((c) => c.function), ...(thinkN ? { thinkChars: thinkN } : {}), ...(stats ? { reason: stats.done_reason, used: stats.prompt_eval_count, gen: stats.eval_count } : {}) });
+        // 学习：想交汇报了，可这一轮一点新笔记都没存（只读了计划文件）：不收，催它马上查资料存笔记（最多催 2 次，步数快用完就不催）
+        if (opts.loop && lean && !savedKb && !denied && !calls.length && nudged < 2 && step < stepCap - 4) {
+          nudged++; const tp = nextTopic();
+          messages.push({ role: 'user', content: `（你这一轮还没往知识库存任何新内容，不能结束。进度已经在系统提示里，不要再读计划文件。现在马上用 web_search 查「${tp || '计划里第一个没学完的主题'}」，查到的要点用 write_file / edit_file 存进知识库 ${cfg.kbDir}，存完再写那一行汇报。）` });
+          log('learn_nudge', { n: nudged, topic: tp });
+          continue;
+        }
         if (quietTok && content.trim() && !(calls.length && !denied)) emit('token', { text: reportLine(content, opts) });   // 学习：没有工具调用的这条才是汇报，补上屏
         if (content) lastText = content;
         if (denied || !calls.length) { if (!opts.sub) lastText = applyLinkFixes(lastText); emit('done', { stats: stats ? { n: stats.eval_count, tps: stats.eval_count / (stats.eval_duration / 1e9) } : null }); return lastText; }
@@ -775,10 +785,12 @@ ${learnTodo()}
             if (!ext && !IMPL[name]) throw new Error('没有这个工具: ' + name);
             if (lean && !LEARN_TOOLS.has(name)) throw new Error('学习时不能用 ' + name + '，只用查资料和读写笔记的工具');   // 模型照着旧聊天记录调 CRM 之类的工具：学习时不执行
             if ((name === 'web_search' || name === 'fetch_url') && !cfg.online) throw new Error('联网开关是关的');
-            if (batch && batch.has(c) && !batchOk) result = '用户拒绝了这一批操作。';
+            if (lean && opts.loop && name === 'read_file' && args && isPlanF(args.path)) result = `（计划文件很长，学习时只给你没学完的条目；要改哪条就用 edit_file 原样照抄那一行。别再读它，直接查资料。）\n${learnTodo()}\n这一轮就学：${nextTopic() || '自己定一个新主题'}`;
+            else if (batch && batch.has(c) && !batchOk) result = '用户拒绝了这一批操作。';
             else { preOk = !!(batch && batch.has(c)); try { result = ext ? await ext.run(args || {}) : await IMPL[name](args || {}); } finally { preOk = false; } }
           } catch (e) { if (e.name === 'StopError') throw e; result = '错误: ' + e.message; }
           const rs = typeof result === 'object' && result && result.text !== undefined ? result : { text: String(result) };
+          if ((name === 'write_file' || name === 'edit_file') && args && args.path && !isPlanF(args.path) && !/^(错误|用户拒绝)/.test(rs.text)) savedKb = true;
           if (lean && rs.text.length > LEAN_RES + 300) rs.text = rs.text.slice(0, LEAN_RES) + `\n…（学习模式下工具结果最多给 ${LEAN_RES} 字，共 ${rs.text.length} 字；要后面的内容请分段读）`;
           log('tool', { name, args, result: rs.text.slice(0, 2000) });
           emit('toolresult', { name, text: rs.text.slice(0, 600) });
