@@ -796,6 +796,7 @@ ${memory() ? `记住的关于用户的事：\n${memory()}\n` : ''}${learnTask()}
     const userMsg = { role: 'user', content: userText + copyHint, ...(opts.images ? { images: opts.images } : {}) };
     messages.push(userMsg); log('user', { text: userText });
     let lastText = '', denied = false, savedKb = false, nudged = 0;   // savedKb：这一轮往计划文件以外的地方存进了笔记
+    let sinceSave = 0, lateNudge = false;   // 学习：上次存笔记以来查了几次资料；快到步数上限还没存时只催一次
     try {
       const stepCap = opts.loop ? cfg.learnSteps || 40 : cfg.maxSteps;   // 学习一轮最多 40 步就收尾进下一轮，别一轮跑几百步、反复压缩（10-07）
       for (let step = 0; step < stepCap; step++) {
@@ -851,7 +852,8 @@ ${memory() ? `记住的关于用户的事：\n${memory()}\n` : ''}${learnTask()}
             else { preOk = !!(batch && batch.has(c)); try { result = ext ? await ext.run(args || {}) : await IMPL[name](args || {}); } finally { preOk = false; } }
           } catch (e) { if (e.name === 'StopError') throw e; result = '错误: ' + e.message; }
           const rs = typeof result === 'object' && result && result.text !== undefined ? result : { text: String(result) };
-          if ((name === 'write_file' || name === 'edit_file') && args && args.path && !isPlanF(args.path) && !/^(错误|用户拒绝)/.test(rs.text)) savedKb = true;
+          if ((name === 'write_file' || name === 'edit_file') && args && args.path && !isPlanF(args.path) && !/^(错误|用户拒绝)/.test(rs.text)) { savedKb = true; sinceSave = 0; }
+          if (name === 'web_search' || name === 'fetch_url') sinceSave++;
           if (lean && rs.text.length > LEAN_RES + 300) rs.text = rs.text.slice(0, LEAN_RES) + `\n…（学习模式下工具结果最多给 ${LEAN_RES} 字，共 ${rs.text.length} 字；要后面的内容请分段读）`;
           log('tool', { name, args, result: rs.text.slice(0, 2000) });
           emit('toolresult', { name, text: rs.text.slice(0, 600) });
@@ -866,6 +868,15 @@ ${memory() ? `记住的关于用户的事：\n${memory()}\n` : ''}${learnTask()}
             const sm = { role: 'user', content: '（这是刚才操作后的屏幕截图，只供你看，不是用户说的话。）', images: rs.images };
             shotMsgs.add(sm); messages.push(sm); emit('shot', { b64: rs.images[0] });
           }
+        }
+        // 10-08：学习时模型一直查资料、攒着不存，40 步用完只能汇报「本轮未写入」，查到的全丢（下一轮记忆清空又得重查）。
+        // 连着查了 learnSaveEvery 次（默认 6）还没存，或者快到步数上限这一轮还一篇没存：催它先把查到的存进笔记
+        const late = !savedKb && !lateNudge && step >= stepCap - 8;
+        if (opts.loop && lean && !denied && (sinceSave >= (cfg.learnSaveEvery || 6) || late)) {
+          if (late) lateNudge = true;
+          sinceSave = 0; const tp = nextTopic();
+          messages.push({ role: 'user', content: `（${late ? '这一轮步数快用完了，还一点没存' : '你已经连着查了好几次资料还没存'}。现在先停止查资料，把已经查到的要点（带出处链接）用 edit_file / write_file 存进知识库 ${cfg.kbDir}${tp ? `里「${tp}」的笔记` : ''}，提纲里答上的问题改成「- [x]」。存完再接着查。）` });
+          log('learn_save_nudge', { step: step + 1, late, topic: tp });
         }
       }
       if (!opts.sub && !opts.loop) emit('notice', { text: `已到最大步数（${cfg.maxSteps}）。` });
